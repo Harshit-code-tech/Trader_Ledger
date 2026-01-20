@@ -8,6 +8,7 @@ Phase 1: Only Add Trade tab is functional.
 import tkinter as tk
 from tkinter import ttk
 from ui.add_trade_tab import AddTradeTab
+from ui.view_records_tab import ViewRecordsTab
 from core.logger import get_logger
 
 logger = get_logger('ui.main_window')
@@ -26,15 +27,7 @@ class TraderLedgerApp:
         self.root.minsize(800, 600)
         logger.debug("Window size set: 900x650, minimum: 800x600")
         
-        # Create notebook (tabs)
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # Create tabs
-        self.create_tabs()
-        logger.info("Main window initialized successfully")
-        
-        # Status bar at bottom
+        # Status bar at bottom (create before tabs so callbacks work)
         self.status_bar = tk.Label(
             self.root,
             text="Ready",
@@ -44,25 +37,27 @@ class TraderLedgerApp:
             font=('Arial', 9)
         )
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Create notebook (tabs)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Create tabs
+        self.create_tabs()
+        logger.info("Main window initialized successfully")
     
     def create_tabs(self) -> None:
-        """Create all tabs. Phase 1: Only Add Trade is functional."""
+        """Create all tabs. Phase 2: Add Trade + View Records functional."""
         
         # Tab 1: Add Trade (Phase 1 - functional)
         add_trade_frame = ttk.Frame(self.notebook)
         self.notebook.add(add_trade_frame, text="  Add Trade  ")
         self.add_trade_tab = AddTradeTab(add_trade_frame, self.update_status)
         
-        # Tab 2: View Records (Phase 2 - placeholder)
+        # Tab 2: View Records (Phase 2 - functional)
         view_records_frame = ttk.Frame(self.notebook)
         self.notebook.add(view_records_frame, text="  View Records  ")
-        placeholder2 = ttk.Label(
-            view_records_frame,
-            text="View Records\n\n(Coming in Phase 2)",
-            font=('Arial', 14),
-            justify='center'
-        )
-        placeholder2.pack(expand=True)
+        self.view_records_tab = ViewRecordsTab(view_records_frame, self.update_status)
         
         # Tab 3: Reports (Phase 3 - placeholder)
         reports_frame = ttk.Frame(self.notebook)
