@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Callable
 from datetime import datetime
+from pathlib import Path
 from core.logger import get_logger
 
 # Import FIFO and P/L calculation modules
@@ -140,6 +141,13 @@ class ReportsTab:
             text="🔄 Recalculate",
             command=self.calculate_reports,
             width=15
+        ).pack(side='right', padx=5)
+        
+        ttk.Button(
+            header_frame,
+            text="🖨️ Print",
+            command=self.print_report,
+            width=12
         ).pack(side='right', padx=5)
         
         # Summary Cards Section
@@ -581,6 +589,199 @@ class ReportsTab:
         for item in self.pnl_tree.get_children():
             self.pnl_tree.delete(item)
     
+    def print_report(self) -> None:
+        """Generate a print-friendly HTML report."""
+        logger.info("Generating print report")
+        
+        try:
+            import webbrowser
+            
+            # Ensure export directory exists
+            Path("data/exports").mkdir(parents=True, exist_ok=True)
+            
+            # Generate timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = f"data/exports/report_{timestamp}.html"
+            
+            # Get current period selection
+            period_type = self.period_var.get()
+            
+            # Build HTML content
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>P/L Report - {datetime.now().strftime("%d %b %Y %I:%M %p")}</title>
+    <style>
+        @media print {{
+            @page {{ margin: 1cm; }}
+            body {{ margin: 0; }}
+        }}
+        
+        body {{
+            font-family: Consolas, 'Courier New', monospace;
+            max-width: 1000px;
+            margin: 20px auto;
+            padding: 20px;
+            background: white;
+        }}
+        
+        h1 {{
+            text-align: center;
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }}
+        
+        .timestamp {{
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }}
+        
+        .summary {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        
+        .card {{
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }}
+        
+        .card-title {{
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 10px;
+        }}
+        
+        .card-value {{
+            font-size: 24px;
+            font-weight: bold;
+        }}
+        
+        .profit {{ color: #27ae60; }}
+        .loss {{ color: #e74c3c; }}
+        
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }}
+        
+        th {{
+            background: #34495e;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }}
+        
+        td {{
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+        }}
+        
+        tr:hover {{
+            background: #f8f9fa;
+        }}
+        
+        .footer {{
+            margin-top: 40px;
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 12px;
+            border-top: 1px solid #ecf0f1;
+            padding-top: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <h1>📊 PROFIT/LOSS REPORT</h1>
+    <div class="timestamp">Generated on {datetime.now().strftime("%d %b %Y at %I:%M %p")}</div>
+    
+    <div class="summary">
+        <div class="card">
+            <div class="card-title">Total Profit</div>
+            <div class="card-value profit">{format_money(self.total_profit)}</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Total Loss</div>
+            <div class="card-value loss">{format_money_abs(self.total_loss)}</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Net P/L</div>
+            <div class="card-value {'profit' if self.net_pnl >= 0 else 'loss'}">{format_money(self.net_pnl)}</div>
+        </div>
+    </div>
+    
+    <h2>{period_type} P/L Breakdown</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Period</th>
+                <th>Profit</th>
+                <th>Loss</th>
+                <th>Net P/L</th>
+                <th>Running Total</th>
+            </tr>
+        </thead>
+        <tbody>
+"""
+            
+            # Add table rows based on current period view
+            for item_id in self.pnl_tree.get_children():
+                values = self.pnl_tree.item(item_id, 'values')
+                if len(values) >= 5:
+                    period_name, profit_str, loss_str, net_str, running_str = values
+                    
+                    # Determine row color based on net P/L
+                    row_class = 'profit' if '₹' in net_str and '-' not in net_str else 'loss' if '-' in net_str else ''
+                    
+                    html_content += f"""
+            <tr>
+                <td>{period_name}</td>
+                <td class="profit">{profit_str}</td>
+                <td class="loss">{loss_str}</td>
+                <td class="{row_class}">{net_str}</td>
+                <td class="{'profit' if '-' not in running_str else 'loss'}">{running_str}</td>
+            </tr>
+"""
+            
+            html_content += """
+        </tbody>
+    </table>
+    
+    <div class="footer">
+        <p>Trader Ledger - FIFO-based P/L Calculation System</p>
+        <p>This report was automatically generated. Please verify all figures.</p>
+    </div>
+</body>
+</html>
+"""
+            
+            # Write HTML file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            logger.info(f"✅ Report saved: {filepath}")
+            
+            # Open in browser
+            webbrowser.open(f'file:///{Path(filepath).absolute()}')
+            
+            messagebox.showinfo(
+                "Report Generated",
+                f"Print-friendly report created:\n{filepath}\n\nOpening in your default browser..."
+            )
+            
+        except Exception as e:
+            logger.error(f"Print report failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Print Failed", f"Failed to generate report:\n{str(e)}")
+
     def on_tab_selected(self) -> None:
         """Called when Reports tab is selected. Triggers recalculation."""
         logger.info("Reports tab selected - triggering automatic recalculation")

@@ -41,6 +41,7 @@ build/
 dist/
 *.spec
 
+data/
 
 docs/
 core/practise/

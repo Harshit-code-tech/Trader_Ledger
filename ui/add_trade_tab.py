@@ -22,6 +22,7 @@ from datetime import date
 import sqlite3
 from typing import Callable
 from core.logger import get_logger
+from core.utils import format_money
 
 logger = get_logger('ui.add_trade_tab')
 
@@ -52,7 +53,7 @@ class AddTradeTab:
         header = ttk.Label(
             main_frame,
             text="ADD NEW TRADE",
-            font=('Arial', 14, 'bold')
+            font=('Consolas', 14, 'bold')
         )
         header.grid(row=0, column=0, columnspan=4, pady=(0, 20))
         
@@ -60,21 +61,21 @@ class AddTradeTab:
         row = 1
         
         # Date
-        ttk.Label(main_frame, text="Date:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.date_entry = ttk.Entry(main_frame, width=20, font=('Arial', 10))
+        ttk.Label(main_frame, text="Date:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.date_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.date_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Arial', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Stock Symbol
-        ttk.Label(main_frame, text="Stock Symbol:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.equity_entry = ttk.Entry(main_frame, width=20, font=('Arial', 10))
+        ttk.Label(main_frame, text="Stock Symbol:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.equity_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.equity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Arial', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Trade Type
-        ttk.Label(main_frame, text="Trade Type:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        ttk.Label(main_frame, text="Trade Type:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
         self.trade_type_var = tk.StringVar(value='BUY')
         type_frame = ttk.Frame(main_frame)
         type_frame.grid(row=row, column=1, sticky='w', padx=5, pady=8)
@@ -83,30 +84,30 @@ class AddTradeTab:
         row += 1
         
         # Quantity
-        ttk.Label(main_frame, text="Quantity:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.quantity_entry = ttk.Entry(main_frame, width=20, font=('Arial', 10))
+        ttk.Label(main_frame, text="Quantity:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.quantity_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.quantity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        ttk.Label(main_frame, text="(shares)", font=('Arial', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        ttk.Label(main_frame, text="(shares)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Price
-        ttk.Label(main_frame, text="Price:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.price_entry = ttk.Entry(main_frame, width=20, font=('Arial', 10))
+        ttk.Label(main_frame, text="Price:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.price_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.price_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        ttk.Label(main_frame, text="(₹ per share)", font=('Arial', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        ttk.Label(main_frame, text="(₹ per share)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Brokerage
-        ttk.Label(main_frame, text="Brokerage:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.brokerage_entry = ttk.Entry(main_frame, width=20, font=('Arial', 10))
+        ttk.Label(main_frame, text="Brokerage:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.brokerage_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.brokerage_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.brokerage_entry.insert(0, "0")  # Default to 0
-        ttk.Label(main_frame, text="(₹)", font=('Arial', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        ttk.Label(main_frame, text="(₹)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Notes
-        ttk.Label(main_frame, text="Notes:", font=('Arial', 10)).grid(row=row, column=0, sticky='ne', padx=5, pady=8)
-        self.notes_entry = tk.Text(main_frame, width=30, height=3, font=('Arial', 10))
+        ttk.Label(main_frame, text="Notes:", font=('Consolas', 10)).grid(row=row, column=0, sticky='ne', padx=5, pady=8)
+        self.notes_entry = tk.Text(main_frame, width=30, height=3, font=('Consolas', 10))
         self.notes_entry.grid(row=row, column=1, columnspan=2, sticky='w', padx=5, pady=8)
         row += 1
         
@@ -137,7 +138,7 @@ class AddTradeTab:
         ttk.Label(
             main_frame,
             text="Recent Trades (Last 5)",
-            font=('Arial', 11, 'bold')
+            font=('Consolas', 11, 'bold')
         ).grid(row=row, column=0, columnspan=4, pady=(10, 5))
         row += 1
         
@@ -181,13 +182,16 @@ class AddTradeTab:
         self.recent_tree.column('Price', width=100, anchor='e')
         self.recent_tree.column('Total', width=120, anchor='e')
         
+        # Add mousewheel scrolling
+        self.recent_tree.bind('<MouseWheel>', lambda e: self.recent_tree.yview_scroll(int(-1*(e.delta/120)), "units"))
+        
         self.recent_tree.pack(fill='both', expand=True)
         
         # Note about Total column (display-only)
         note = ttk.Label(
             parent,
-            text="Note: 'Total' is display-only (BUY: qty×price+brokerage | SELL: qty×price-brokerage)",
-            font=('Arial', 8),
+            text="Note: 'Total' is display-only (BUY: qty\u00d7price+brokerage | SELL: qty\u00d7price-brokerage)",
+            font=('Consolas', 8),
             foreground='gray'
         )
         note.grid(row=row+1, column=0, columnspan=4, pady=5)
@@ -339,15 +343,11 @@ class AddTradeTab:
             for trade in trades:
                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise = trade
                 
-                # Convert paise → rupees for display
-                price_rupees = price_paise / 100
-                brokerage_rupees = brokerage_paise / 100
-                
                 # DISPLAY-ONLY calculation (NOT used in engine)
                 if trade_type == 'BUY':
-                    total = (quantity * price_rupees) + brokerage_rupees
+                    total_paise = (quantity * price_paise) + brokerage_paise
                 else:  # SELL
-                    total = (quantity * price_rupees) - brokerage_rupees
+                    total_paise = (quantity * price_paise) - brokerage_paise
                 
                 # Format date DD-MM-YYYY
                 year, month, day = trade_date.split('-')
@@ -358,8 +358,8 @@ class AddTradeTab:
                     equity,
                     trade_type,
                     quantity,
-                    f"₹{price_rupees:.2f}",
-                    f"₹{total:.2f}"  # Display-only total
+                    format_money(price_paise),
+                    format_money(total_paise)  # Display-only total
                 ))
         
         except Exception as e:

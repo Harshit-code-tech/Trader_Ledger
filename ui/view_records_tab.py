@@ -23,6 +23,7 @@ import csv
 from pathlib import Path
 from typing import Callable, Optional
 from core.logger import get_logger
+from core.utils import format_money
 
 logger = get_logger('ui.view_records_tab')
 
@@ -55,7 +56,7 @@ class ViewRecordsTab:
         header = ttk.Label(
             main_frame,
             text="VIEW TRADE RECORDS",
-            font=('Arial', 14, 'bold')
+            font=('Consolas', 14, 'bold')
         )
         header.pack(pady=(0, 10))
         
@@ -202,6 +203,23 @@ class ViewRecordsTab:
         
         ttk.Button(
             button_frame,
+            text="💾 Backup DB",
+            command=self.backup_database,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="📥 Restore DB",
+            command=self.restore_database,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        # Separator
+        ttk.Separator(button_frame, orient='vertical').pack(side='left', fill='y', padx=10)
+        
+        ttk.Button(
+            button_frame,
             text="💾 Export CSV",
             command=self.export_to_csv,
             width=15
@@ -283,10 +301,6 @@ class ViewRecordsTab:
             for trade in trades:
                 trade_id, trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, is_active = trade
                 
-                # Convert paise → rupees
-                price_rupees = price_paise / 100
-                brokerage_rupees = brokerage_paise / 100
-                
                 # Format date DD-MM-YYYY
                 year, month, day = trade_date.split('-')
                 display_date = f"{day}-{month}-{year}"
@@ -301,8 +315,8 @@ class ViewRecordsTab:
                     equity,
                     trade_type,
                     quantity,
-                    f"₹{price_rupees:.2f}",
-                    f"₹{brokerage_rupees:.2f}",
+                    format_money(price_paise),
+                    format_money(brokerage_paise),
                     notes[:50] + "..." if len(notes) > 50 else notes,
                     status
                 ))
@@ -697,6 +711,96 @@ class ViewRecordsTab:
         except Exception as e:
             logger.error(f"Excel export failed: {str(e)}", exc_info=True)
             messagebox.showerror("Export Failed", f"Failed to export Excel:\n{str(e)}")
+    
+    def backup_database(self) -> None:
+        """Create a timestamped backup of the database."""
+        logger.info("Creating database backup")
+        
+        try:
+            import shutil
+            from tkinter import filedialog
+            
+            # Generate default filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"trades_backup_{timestamp}.db"
+            
+            # Ask user where to save
+            filepath = filedialog.asksaveasfilename(
+                title="Save Database Backup",
+                defaultextension=".db",
+                initialfile=default_filename,
+                filetypes=[("Database files", "*.db"), ("All files", "*.*")]
+            )
+            
+            if not filepath:
+                logger.info("Backup cancelled by user")
+                return
+            
+            # Copy database file
+            shutil.copy2("data/trades.db", filepath)
+            
+            logger.info(f"✅ Database backed up to: {filepath}")
+            self.update_status(f"✅ Backup saved: {Path(filepath).name}")
+            messagebox.showinfo("Backup Successful", f"Database backed up to:\n{filepath}")
+            
+        except Exception as e:
+            logger.error(f"Backup failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Backup Failed", f"Failed to backup database:\n{str(e)}")
+    
+    def restore_database(self) -> None:
+        """Restore database from a backup file."""
+        logger.info("Restoring database from backup")
+        
+        try:
+            import shutil
+            from tkinter import filedialog
+            
+            # Warn user
+            result = messagebox.askyesno(
+                "Confirm Restore",
+                "⚠️ WARNING: This will replace your current database!\n\n"
+                "All current trades will be replaced with the backup data.\n\n"
+                "It's recommended to create a backup of your current database first.\n\n"
+                "Do you want to continue?"
+            )
+            
+            if not result:
+                logger.info("Restore cancelled by user")
+                return
+            
+            # Ask user to select backup file
+            filepath = filedialog.askopenfilename(
+                title="Select Backup File to Restore",
+                filetypes=[("Database files", "*.db"), ("All files", "*.*")]
+            )
+            
+            if not filepath:
+                logger.info("Restore cancelled - no file selected")
+                return
+            
+            # Create a safety backup of current database
+            safety_backup = f"data/trades_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            shutil.copy2("data/trades.db", safety_backup)
+            logger.info(f"Created safety backup: {safety_backup}")
+            
+            # Restore from backup
+            shutil.copy2(filepath, "data/trades.db")
+            
+            logger.info(f"✅ Database restored from: {filepath}")
+            self.update_status("✅ Database restored")
+            messagebox.showinfo(
+                "Restore Successful",
+                f"Database restored from:\n{filepath}\n\n"
+                f"Safety backup created:\n{safety_backup}\n\n"
+                "Refreshing records..."
+            )
+            
+            # Refresh display
+            self.refresh_records()
+            
+        except Exception as e:
+            logger.error(f"Restore failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Restore Failed", f"Failed to restore database:\n{str(e)}")
 
 
 class EditTradeDialog:
@@ -710,7 +814,8 @@ class EditTradeDialog:
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"Edit Trade #{trade_id}")
-        self.dialog.geometry("500x400")
+        self.dialog.geometry("550x500")
+        self.dialog.resizable(False, False)  # Prevent accidental resizing
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -727,13 +832,13 @@ class EditTradeDialog:
         main_frame = ttk.Frame(self.dialog, padding="20")
         main_frame.pack(fill='both', expand=True)
         
-        ttk.Label(main_frame, text=f"EDIT TRADE #{trade_id}", font=('Arial', 12, 'bold')).grid(row=0, column=0, columnspan=2, pady=(0, 20))
+        ttk.Label(main_frame, text=f"EDIT TRADE #{trade_id}", font=('Consolas', 12, 'bold')).grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
         row = 1
         
         # Trade ID (readonly display)
-        ttk.Label(main_frame, text="Trade ID:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        id_display = ttk.Label(main_frame, text=f"#{trade_id}", font=('Arial', 10, 'bold'), foreground='blue')
+        ttk.Label(main_frame, text="Trade ID:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        id_display = ttk.Label(main_frame, text=f"#{trade_id}", font=('Consolas', 10, 'bold'), foreground='blue')
         id_display.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         row += 1
         
