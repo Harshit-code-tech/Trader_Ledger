@@ -56,7 +56,7 @@ class ViewRecordsTab:
         header = ttk.Label(
             main_frame,
             text="VIEW TRADE RECORDS",
-            font=('Consolas', 14, 'bold')
+            font=('Consolas', 16, 'bold')
         )
         header.pack(pady=(0, 10))
         
@@ -104,10 +104,20 @@ class ViewRecordsTab:
         ttk.Button(row1, text="Apply Filters", command=self.apply_filters, width=12).pack(side='left', padx=10)
         ttk.Button(row1, text="Clear Filters", command=self.clear_filters, width=12).pack(side='left')
         
-        # Row 2: Date Range (placeholder for future)
+        # Row 2: Date Range Filter
         row2 = ttk.Frame(filter_frame)
         row2.pack(fill='x', pady=5)
-        ttk.Label(row2, text="Date range filters coming soon", font=('Arial', 8), foreground='gray').pack(side='left')
+        ttk.Label(row2, text="From:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
+        self.date_from_entry = ttk.Entry(row2, width=12)
+        self.date_from_entry.pack(side='left', padx=(0, 5))
+        self.date_from_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_from_entry))
+        ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left', padx=(0, 15))
+        
+        ttk.Label(row2, text="To:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
+        self.date_to_entry = ttk.Entry(row2, width=12)
+        self.date_to_entry.pack(side='left', padx=(0, 5))
+        self.date_to_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_to_entry))
+        ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left')
     
     def create_table_section(self, parent: ttk.Frame) -> None:
         """Create table to display records."""
@@ -281,6 +291,30 @@ class ViewRecordsTab:
                 query += " AND trade_type = ?"
                 params.append(type_filter)
             
+            # Date range filter
+            date_from = self.date_from_entry.get().strip()
+            date_to = self.date_to_entry.get().strip()
+            
+            if date_from:
+                try:
+                    # Convert DD-MM-YYYY to YYYY-MM-DD
+                    day, month, year = date_from.split('-')
+                    date_from_db = f"{year}-{month}-{day}"
+                    query += " AND trade_date >= ?"
+                    params.append(date_from_db)
+                except ValueError:
+                    logger.warning(f"Invalid date format for 'from': {date_from}")
+            
+            if date_to:
+                try:
+                    # Convert DD-MM-YYYY to YYYY-MM-DD
+                    day, month, year = date_to.split('-')
+                    date_to_db = f"{year}-{month}-{day}"
+                    query += " AND trade_date <= ?"
+                    params.append(date_to_db)
+                except ValueError:
+                    logger.warning(f"Invalid date format for 'to': {date_to}")
+            
             # Apply deleted filter based on checkbox
             if not self.show_deleted_trades.get():
                 query += " AND is_active = 1"  # Only show active trades
@@ -348,14 +382,37 @@ class ViewRecordsTab:
     
     def apply_filters(self) -> None:
         """Apply current filters and refresh."""
-        logger.info(f"Applying filters - Equity: {self.equity_filter.get()}, Type: {self.type_filter.get()}, Show Deleted: {self.show_deleted_trades.get()}")
+        date_from = self.date_from_entry.get().strip()
+        date_to = self.date_to_entry.get().strip()
+        logger.info(f"Applying filters - Equity: {self.equity_filter.get()}, Type: {self.type_filter.get()}, Date: {date_from} to {date_to}, Show Deleted: {self.show_deleted_trades.get()}")
         self.refresh_records()
+    
+    def validate_date_field(self, entry: ttk.Entry) -> bool:
+        """Validate date format in entry field. Clear if invalid."""
+        value = entry.get().strip()
+        if not value:
+            return True
+        
+        try:
+            day, month, year = value.split('-')
+            if len(day) != 2 or len(month) != 2 or len(year) != 4:
+                raise ValueError("Invalid format")
+            # Basic range check
+            if not (1 <= int(day) <= 31 and 1 <= int(month) <= 12 and 1900 <= int(year) <= 2100):
+                raise ValueError("Invalid date range")
+            return True
+        except (ValueError, AttributeError):
+            messagebox.showwarning("Invalid Date", f"Please enter date in DD-MM-YYYY format\n(e.g., 20-01-2026)")
+            entry.delete(0, tk.END)
+            return False
     
     def clear_filters(self) -> None:
         """Clear all filters and refresh."""
         logger.info("Clearing all filters")
         self.equity_filter.set("All")
         self.type_filter.set("All")
+        self.date_from_entry.delete(0, tk.END)
+        self.date_to_entry.delete(0, tk.END)
         self.show_deleted_trades.set(False)
         self.refresh_records()
     

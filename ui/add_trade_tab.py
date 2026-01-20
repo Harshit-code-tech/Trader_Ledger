@@ -53,7 +53,7 @@ class AddTradeTab:
         header = ttk.Label(
             main_frame,
             text="ADD NEW TRADE",
-            font=('Consolas', 14, 'bold')
+            font=('Consolas', 16, 'bold')
         )
         header.grid(row=0, column=0, columnspan=4, pady=(0, 20))
         
@@ -69,9 +69,11 @@ class AddTradeTab:
         
         # Stock Symbol
         ttk.Label(main_frame, text="Stock Symbol:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.equity_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
+        self.equity_var = tk.StringVar()
+        self.equity_entry = ttk.Combobox(main_frame, textvariable=self.equity_var, width=18, font=('Consolas', 10))
         self.equity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        self.load_equity_dropdown()
         row += 1
         
         # Trade Type
@@ -137,8 +139,8 @@ class AddTradeTab:
         
         ttk.Label(
             main_frame,
-            text="Recent Trades (Last 5)",
-            font=('Consolas', 11, 'bold')
+            text="RECENT TRADES (Last 5)",
+            font=('Consolas', 13, 'bold')
         ).grid(row=row, column=0, columnspan=4, pady=(10, 5))
         row += 1
         
@@ -198,6 +200,21 @@ class AddTradeTab:
         
         # Load recent trades
         self.refresh_recent_trades()
+    
+    def load_equity_dropdown(self) -> None:
+        """Load unique equity symbols from database for autocomplete."""
+        try:
+            conn = sqlite3.connect('data/trades.db')
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
+            equities = [row[0] for row in c.fetchall()]
+            conn.close()
+            
+            self.equity_entry['values'] = equities
+            logger.debug(f"Loaded {len(equities)} unique equities for dropdown")
+        except Exception as e:
+            logger.error(f"Failed to load equities: {str(e)}")
+            self.equity_entry['values'] = []
     
     def validate_inputs(self) -> tuple[bool, str]:
         """
@@ -285,6 +302,9 @@ class AddTradeTab:
             brokerage_paise = int(brokerage_rupees * 100)
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
+            
+            # Normalize equity (uppercase, strip spaces)
+            equity = equity.strip().upper()
             
             logger.info(f"Preparing to save trade: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f} on {date_str}")
             logger.debug(f"Trade details - Date: {trade_date}, Equity: {equity}, Type: {trade_type}, Qty: {quantity}, Price: {price_paise} paise, Brokerage: {brokerage_paise} paise")

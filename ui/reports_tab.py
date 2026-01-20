@@ -118,7 +118,7 @@ class ReportsTab:
         ttk.Label(
             header_frame,
             text="PROFIT/LOSS REPORTS",
-            font=('Consolas', 14, 'bold')
+            font=('Consolas', 16, 'bold')
         ).pack(side='left')
         
         # Period selector
@@ -162,11 +162,20 @@ class ReportsTab:
     def create_dynamic_pnl_section(self, parent: ttk.Frame) -> None:
         """Create dynamic P/L breakdown table that changes based on period selection."""
         
+        # Context header (explains what the table shows)
+        context_label = ttk.Label(
+            parent,
+            text="Showing SELL-based P/L (FIFO applied, realized only)",
+            font=('Consolas', 9),
+            foreground='gray'
+        )
+        context_label.pack(anchor='w', pady=(0, 5))
+        
         # Title label (will update based on selection)
         self.pnl_title_label = ttk.Label(
             parent,
-            text="Daily P/L Breakdown",
-            font=('Arial', 12, 'bold')
+            text="DAILY P/L",
+            font=('Consolas', 13, 'bold')
         )
         self.pnl_title_label.pack(anchor='w', pady=(0, 10))
         
@@ -189,18 +198,22 @@ class ReportsTab:
         )
         scrollbar.config(command=self.pnl_tree.yview)
         
-        # Configure columns
-        self.pnl_tree.heading('Period', text='Period')
-        self.pnl_tree.heading('Profit', text='Profit')
-        self.pnl_tree.heading('Loss', text='Loss')
-        self.pnl_tree.heading('Net P/L', text='Net P/L')
-        self.pnl_tree.heading('Running Total', text='Accumulated P/L')
+        # Configure columns with proper alignment
+        self.pnl_tree.heading('Period', text='Period', anchor='w')
+        self.pnl_tree.heading('Profit', text='Profit (₹)', anchor='e')
+        self.pnl_tree.heading('Loss', text='Loss (₹)', anchor='e')
+        self.pnl_tree.heading('Net P/L', text='Net P/L (₹)', anchor='e')
+        self.pnl_tree.heading('Running Total', text='⭐ Accumulated (₹)', anchor='e')  # Star for emphasis
         
-        self.pnl_tree.column('Period', width=180, anchor='center')
-        self.pnl_tree.column('Profit', width=120, anchor='e')
-        self.pnl_tree.column('Loss', width=120, anchor='e')
-        self.pnl_tree.column('Net P/L', width=120, anchor='e')
-        self.pnl_tree.column('Running Total', width=140, anchor='e')
+        self.pnl_tree.column('Period', width=200, anchor='w')
+        self.pnl_tree.column('Profit', width=130, anchor='e')
+        self.pnl_tree.column('Loss', width=130, anchor='e')
+        self.pnl_tree.column('Net P/L', width=130, anchor='e')
+        self.pnl_tree.column('Running Total', width=160, anchor='e')  # Slightly wider for emphasis
+        
+        # Configure zebra striping tags
+        self.pnl_tree.tag_configure('evenrow', background='#f8f9fa')
+        self.pnl_tree.tag_configure('oddrow', background='white')
         
         # Bind mousewheel
         self.pnl_tree.bind('<MouseWheel>', lambda e: self.pnl_tree.yview_scroll(int(-1*(e.delta/120)), "units"))
@@ -211,7 +224,7 @@ class ReportsTab:
         """Create summary cards for Total Profit, Total Loss, Net P/L."""
         
         cards_frame = ttk.Frame(parent)
-        cards_frame.pack(fill='x', pady=(0, 10))
+        cards_frame.pack(fill='x', pady=(0, 20))
         
         # Configure grid to center cards
         cards_frame.columnconfigure(0, weight=1)
@@ -219,47 +232,56 @@ class ReportsTab:
         cards_frame.columnconfigure(2, weight=1)
         
         # Card 1: Total Profit
-        profit_card = ttk.LabelFrame(cards_frame, text="📈 Total Realized Profit", padding="15")
-        profit_card.grid(row=0, column=0, padx=10, pady=5, sticky='ew')
+        profit_card = ttk.LabelFrame(cards_frame, text="📈 Total Profit", padding="20")
+        profit_card.grid(row=0, column=0, padx=15, pady=10, sticky='ew')
+        
+        # Small label above
+        ttk.Label(profit_card, text="Total Profit", font=('Consolas', 9), foreground='gray').pack()
         
         self.profit_label = ttk.Label(
             profit_card,
-            text="₹0.00",
-            font=('Consolas', 18, 'bold'),
-            foreground='green'
+            text="₹ +0.00",
+            font=('Consolas', 22, 'bold'),
+            foreground='#27ae60'
         )
-        self.profit_label.pack()
+        self.profit_label.pack(pady=(5, 0))
         
         # Card 2: Total Loss
-        loss_card = ttk.LabelFrame(cards_frame, text="📉 Total Realized Loss", padding="15")
-        loss_card.grid(row=0, column=1, padx=10, pady=5, sticky='ew')
+        loss_card = ttk.LabelFrame(cards_frame, text="📉 Total Loss", padding="20")
+        loss_card.grid(row=0, column=1, padx=15, pady=10, sticky='ew')
+        
+        # Small label above
+        ttk.Label(loss_card, text="Total Loss", font=('Consolas', 9), foreground='gray').pack()
         
         self.loss_label = ttk.Label(
             loss_card,
-            text="₹0.00",
-            font=('Consolas', 18, 'bold'),
-            foreground='red'
+            text="₹ -0.00",
+            font=('Consolas', 22, 'bold'),
+            foreground='#e74c3c'
         )
-        self.loss_label.pack()
+        self.loss_label.pack(pady=(5, 0))
         
         # Card 3: Net P/L with emotion
-        net_card = ttk.LabelFrame(cards_frame, text="🧮 Net Profit/Loss", padding="15")
-        net_card.grid(row=0, column=2, padx=10, pady=5, sticky='ew')
+        net_card = ttk.LabelFrame(cards_frame, text="🧮 Net P/L", padding="20")
+        net_card.grid(row=0, column=2, padx=15, pady=10, sticky='ew')
         
-        emotion_frame = ttk.Frame(net_card)
-        emotion_frame.pack()
+        # Small label above
+        ttk.Label(net_card, text="Net P/L", font=('Consolas', 9), foreground='gray').pack()
+        
+        value_frame = ttk.Frame(net_card)
+        value_frame.pack(pady=(5, 0))
         
         self.emotion_label = ttk.Label(
-            emotion_frame,
+            value_frame,
             text="😐",
-            font=('Arial', 24)
+            font=('Arial', 28)
         )
-        self.emotion_label.pack(side='left', padx=(0, 10))
+        self.emotion_label.pack(side='left', padx=(0, 8))
         
         self.net_label = ttk.Label(
-            emotion_frame,
-            text="₹0.00",
-            font=('Consolas', 18, 'bold')
+            value_frame,
+            text="₹ 0.00",
+            font=('Consolas', 22, 'bold')
         )
         self.net_label.pack(side='left')
     
@@ -360,21 +382,35 @@ class ReportsTab:
     def update_displays(self) -> None:
         """Update all display elements with calculated values."""
         
-        # Update summary cards
-        self.profit_label.config(text=f"₹{self.total_profit/100:.2f}")
-        self.loss_label.config(text=f"₹{abs(self.total_loss)/100:.2f}")
-        self.net_label.config(text=f"₹{self.net_pnl/100:.2f}")
+        # Update summary cards with proper formatting (₹ +1,234.00 style)
+        profit_text = format_money(self.total_profit)
+        if self.total_profit > 0:
+            profit_text = profit_text.replace('₹', '₹ +')
+        
+        loss_text = format_money_abs(self.total_loss)
+        if self.total_loss < 0:
+            loss_text = loss_text.replace('₹', '₹ -')
+        
+        net_text = format_money(self.net_pnl)
+        if self.net_pnl > 0:
+            net_text = net_text.replace('₹', '₹ +')
+        elif self.net_pnl < 0:
+            net_text = net_text.replace('₹', '₹ -')
+        
+        self.profit_label.config(text=profit_text)
+        self.loss_label.config(text=loss_text)
+        self.net_label.config(text=net_text)
         
         # Update emotion and net P/L color
         if self.net_pnl > 0:
             self.emotion_label.config(text="🙂")  # Happy
-            self.net_label.config(foreground='green')
+            self.net_label.config(foreground='#27ae60')
         elif self.net_pnl < 0:
             self.emotion_label.config(text="😢")  # Sad
-            self.net_label.config(foreground='red')
+            self.net_label.config(foreground='#e74c3c')
         else:
             self.emotion_label.config(text="😐")  # Neutral
-            self.net_label.config(foreground='black')
+            self.net_label.config(foreground='#34495e')
         
         # Update period-specific table
         self.update_period_display()
@@ -384,7 +420,13 @@ class ReportsTab:
         period = self.period_var.get()
         
         # Update title
-        self.pnl_title_label.config(text=f"{period} P/L Breakdown")
+        title_map = {
+            "Daily": "DAILY P/L",
+            "Weekly": "WEEKLY P/L", 
+            "Monthly": "MONTHLY P/L",
+            "Yearly": "YEARLY P/L"
+        }
+        self.pnl_title_label.config(text=title_map.get(period, "P/L BREAKDOWN"))
         
         # Clear existing data
         for item in self.pnl_tree.get_children():
@@ -396,18 +438,31 @@ class ReportsTab:
             format_func = self._format_date
         elif period == "Weekly":
             data_dict = self.weekly_pnl
-            format_func = lambda x: x  # Already formatted as YYYY-Www
+            format_func = self._format_week
         elif period == "Monthly":
             data_dict = self.monthly_pnl
             format_func = self._format_month
         elif period == "Yearly":
             data_dict = self.yearly_pnl
-            format_func = lambda x: x  # Already formatted as YYYY
+            format_func = self._format_year
         else:
             return
         
-        # Populate table with running total
+        # Handle empty state
+        if not data_dict:
+            empty_item = self.pnl_tree.insert('', 'end', values=(
+                "No realized P/L in this period",
+                "",
+                "",
+                "(no SELL trades)",
+                ""
+            ), tags=('empty',))
+            self.pnl_tree.tag_configure('empty', foreground='gray')
+            return
+        
+        # Populate table with running total and zebra striping
         running_total = 0
+        row_index = 0
         for period_key, pnl_data in sorted(data_dict.items(), reverse=True):
             profit = pnl_data['profit']
             loss = pnl_data['loss']
@@ -416,33 +471,69 @@ class ReportsTab:
             
             display_period = format_func(period_key)
             
+            # Format values with proper +/- signs
+            profit_text = format_money(profit) if profit > 0 else "\u20b9 0.00"
+            if profit > 0:
+                profit_text = profit_text.replace('\u20b9', '\u20b9 +')
+            
+            loss_text = format_money_abs(loss) if loss < 0 else "\u20b9 0.00"
+            if loss < 0:
+                loss_text = loss_text.replace('\u20b9', '\u20b9 -')
+            
+            net_text = format_money(net)
+            if net > 0:
+                net_text = net_text.replace('\u20b9', '\u20b9 +')
+            elif net < 0:
+                net_text = net_text.replace('\u20b9', '\u20b9 -')
+            
+            acc_text = format_money(running_total)
+            if running_total > 0:
+                acc_text = acc_text.replace('\u20b9', '\u20b9 +')
+            elif running_total < 0:
+                acc_text = acc_text.replace('\u20b9', '\u20b9 -')
+                        # Add visual weight to accumulated (the answer column)
+            acc_text = f"→ {acc_text}"
+                        # Zebra striping
+            tag = 'evenrow' if row_index % 2 == 0 else 'oddrow'
+            
             item = self.pnl_tree.insert('', 'end', values=(
                 display_period,
-                format_money(profit) if profit > 0 else "₹0.00",
-                format_money_abs(loss) if loss < 0 else "₹0.00",
-                format_money(net),
-                format_money(running_total)
-            ))
+                profit_text,
+                loss_text,
+                net_text,
+                acc_text
+            ), tags=(tag,))
             
-            # Color code net P/L
-            if net > 0:
-                self.pnl_tree.item(item, tags=('profit',))
-            elif net < 0:
-                self.pnl_tree.item(item, tags=('loss',))
-        
-        self.pnl_tree.tag_configure('profit', foreground='green')
-        self.pnl_tree.tag_configure('loss', foreground='red')
+            row_index += 1
     
     def _format_date(self, date_str: str) -> str:
-        """Format YYYY-MM-DD to DD-MM-YYYY."""
+        """Format YYYY-MM-DD to '15 Jan 2026'."""
         year, month, day = date_str.split('-')
-        return f"{day}-{month}-{year}"
+        month_name = datetime.strptime(month, "%m").strftime("%b")
+        return f"{int(day)} {month_name} {year}"
+    
+    def _format_week(self, week_str: str) -> str:
+        """Format YYYY-Www to 'Week 3 (Jan 2026)'."""
+        # week_str format: 2026-W03
+        year, week = week_str.split('-W')
+        # Get first day of the week to determine month
+        from datetime import datetime, timedelta
+        # ISO week starts on Monday
+        jan4 = datetime(int(year), 1, 4)  # Jan 4 is always in week 1
+        week1_monday = jan4 - timedelta(days=jan4.weekday())
+        target_monday = week1_monday + timedelta(weeks=int(week)-1)
+        month_name = target_monday.strftime("%b")
+        return f"Week {int(week)} ({month_name} {year})"
     
     def _format_month(self, month_str: str) -> str:
-        """Format YYYY-MM to MMM YYYY."""
+        """Format YYYY-MM to 'Jan 2026'."""
         year, month = month_str.split('-')
         month_name = datetime.strptime(month, "%m").strftime("%b")
         return f"{month_name} {year}"
+    
+    def _format_year(self, year_str: str) -> str:
+        """Format YYYY to 'Year 2026'."""
+        return f"Year {year_str}"
         """Update all display elements with calculated values."""
         
         # Update summary cards
@@ -580,9 +671,9 @@ class ReportsTab:
         self.monthly_pnl = {}
         self.yearly_pnl = {}
         
-        self.profit_label.config(text="₹0.00")
-        self.loss_label.config(text="₹0.00")
-        self.net_label.config(text="₹0.00", foreground='black')
+        self.profit_label.config(text="₹ +0.00")
+        self.loss_label.config(text="₹ -0.00")
+        self.net_label.config(text="₹ 0.00", foreground='#34495e')
         self.emotion_label.config(text="😐")
         
         # Clear the unified tree
