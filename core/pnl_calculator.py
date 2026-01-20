@@ -1,7 +1,39 @@
+from typing import TypedDict
+
+
 class PnlCalculationError(Exception):
     pass
 
-def allocate_brokerage(total_brokerage, total_quantity, match_quantities):
+
+class TradeDict(TypedDict):
+    id: int
+    trade_date: str
+    trade_type: str
+    quantity: int
+    price: int
+    brokerage: int
+    notes: str
+    is_active: int
+
+
+class MatchRecord(TypedDict):
+    sell_id: int
+    buy_id: int
+    matched_quantity: int
+
+
+class PnlResult(TypedDict):
+    sell_id: int
+    buy_id: int
+    matched_quantity: int
+    buy_cost: int
+    sell_value: int
+    buy_brokerage_alloc: int
+    sell_brokerage_alloc: int
+    realized_pnl: int
+
+
+def allocate_brokerage(total_brokerage: int, total_quantity: int, match_quantities: list[int]) -> list[int]:
     """
     Allocate total_brokerage (int, paise) across match_quantities (list of int),
     using explicit proportional allocation:
@@ -12,17 +44,17 @@ def allocate_brokerage(total_brokerage, total_quantity, match_quantities):
     """
     if sum(match_quantities) != total_quantity:
         raise PnlCalculationError(f"Sum of match quantities ({sum(match_quantities)}) does not equal trade quantity ({total_quantity})")
-    allocations = [
+    allocations: list[int] = [
         (total_brokerage * qty) // total_quantity
         for qty in match_quantities
     ]
-    allocated = sum(allocations)
-    remainder = total_brokerage - allocated
+    allocated: int = sum(allocations)
+    remainder: int = total_brokerage - allocated
     if allocations:
         allocations[-1] += remainder  # Assign remainder to last match (FIFO order)
     return allocations
 
-def calculate_match_pnl(matches, trades_by_id):
+def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, TradeDict]) -> list[PnlResult]:
     """
     For each match, compute cost basis, sell value, allocated brokerages, and realized P/L.
     matches: list of dicts {sell_id, buy_id, matched_quantity}
@@ -38,50 +70,50 @@ def calculate_match_pnl(matches, trades_by_id):
         if match['sell_id'] not in trades_by_id:
             raise PnlCalculationError(f"SELL trade_id {match['sell_id']} not found in trades_by_id.")
     # Group matches by buy_id and sell_id for brokerage allocation
-    buy_matches = defaultdict(list)
-    sell_matches = defaultdict(list)
+    buy_matches: defaultdict[int, list[int]] = defaultdict(list)
+    sell_matches: defaultdict[int, list[int]] = defaultdict(list)
     for match in matches:
         buy_matches[match['buy_id']].append(match['matched_quantity'])
         sell_matches[match['sell_id']].append(match['matched_quantity'])
     # Precompute brokerage allocations for all matches
-    buy_brokerage_allocs = {}
+    buy_brokerage_allocs: dict[int, list[int]] = {}
     for buy_id, qtys in buy_matches.items():
-        trade = trades_by_id[buy_id]
-        allocs = allocate_brokerage(trade['brokerage'], sum(qtys), qtys)  # Only allocate to matched portion
+        trade: TradeDict = trades_by_id[buy_id]
+        allocs: list[int] = allocate_brokerage(trade['brokerage'], sum(qtys), qtys)  # Only allocate to matched portion
         buy_brokerage_allocs[buy_id] = allocs
-    sell_brokerage_allocs = {}
+    sell_brokerage_allocs: dict[int, list[int]] = {}
     for sell_id, qtys in sell_matches.items():
-        trade = trades_by_id[sell_id]
-        allocs = allocate_brokerage(trade['brokerage'], trade['quantity'], qtys)  # Allocate full SELL brokerage
+        trade: TradeDict = trades_by_id[sell_id]
+        allocs: list[int] = allocate_brokerage(trade['brokerage'], trade['quantity'], qtys)  # Allocate full SELL brokerage
         sell_brokerage_allocs[sell_id] = allocs
     # Now build per-match P&L
-    buy_alloc_idx = defaultdict(int)
-    sell_alloc_idx = defaultdict(int)
-    results = []
+    buy_alloc_idx: defaultdict[int, int] = defaultdict(int)
+    sell_alloc_idx: defaultdict[int, int] = defaultdict(int)
+    results: list[PnlResult] = []
     for match in matches:
-        sell_id = match['sell_id']
-        buy_id = match['buy_id']
-        qty = match['matched_quantity']
-        buy = trades_by_id[buy_id]
-        sell = trades_by_id[sell_id]
-        buy_cost = qty * buy['price']
-        sell_value = qty * sell['price']
+        sell_id: int = match['sell_id']
+        buy_id: int = match['buy_id']
+        qty: int = match['matched_quantity']
+        buy: TradeDict = trades_by_id[buy_id]
+        sell: TradeDict = trades_by_id[sell_id]
+        buy_cost: int = qty * buy['price']
+        sell_value: int = qty * sell['price']
         # Get correct allocation for this match
-        buy_alloc = buy_brokerage_allocs[buy_id][buy_alloc_idx[buy_id]]
-        sell_alloc = sell_brokerage_allocs[sell_id][sell_alloc_idx[sell_id]]
+        buy_alloc: int = buy_brokerage_allocs[buy_id][buy_alloc_idx[buy_id]]
+        sell_alloc: int = sell_brokerage_allocs[sell_id][sell_alloc_idx[sell_id]]
         buy_alloc_idx[buy_id] += 1
         sell_alloc_idx[sell_id] += 1
-        realized_pnl = sell_value - buy_cost - buy_alloc - sell_alloc
-        results.append({
-            'sell_id': sell_id,
-            'buy_id': buy_id,
-            'matched_quantity': qty,
-            'buy_cost': buy_cost,
-            'sell_value': sell_value,
-            'buy_brokerage_alloc': buy_alloc,
-            'sell_brokerage_alloc': sell_alloc,
-            'realized_pnl': realized_pnl
-        })
+        realized_pnl: int = sell_value - buy_cost - buy_alloc - sell_alloc
+        results.append(PnlResult(
+            sell_id=sell_id,
+            buy_id=buy_id,
+            matched_quantity=qty,
+            buy_cost=buy_cost,
+            sell_value=sell_value,
+            buy_brokerage_alloc=buy_alloc,
+            sell_brokerage_alloc=sell_alloc,
+            realized_pnl=realized_pnl
+        ))
     return results
 
 # Manual unit tests for allocate_brokerage
@@ -104,25 +136,25 @@ if __name__ == '__main__':
     print("\nTesting realized P/L sum invariant...")
     # Example trades and matches
     # All values in paise
-    trades_by_id = {
-        1: {'id': 1, 'price': 1000, 'brokerage': 10, 'quantity': 10},  # BUY
-        2: {'id': 2, 'price': 1200, 'brokerage': 6, 'quantity': 6},    # SELL
+    trades_by_id: dict[int, TradeDict] = {
+        1: TradeDict(id=1, trade_date='2026-01-15', trade_type='BUY', quantity=10, price=1000, brokerage=10, notes='', is_active=1),
+        2: TradeDict(id=2, trade_date='2026-01-15', trade_type='SELL', quantity=6, price=1200, brokerage=6, notes='', is_active=1),
     }
     # SELL 2 matches BUY 1 in two lots: 4 and 2
-    matches = [
-        {'sell_id': 2, 'buy_id': 1, 'matched_quantity': 4},
-        {'sell_id': 2, 'buy_id': 1, 'matched_quantity': 2},
+    matches: list[MatchRecord] = [
+        MatchRecord(sell_id=2, buy_id=1, matched_quantity=4),
+        MatchRecord(sell_id=2, buy_id=1, matched_quantity=2),
     ]
     # Calculate per-match P/L
-    match_results = calculate_match_pnl(matches, trades_by_id)
+    match_results: list[PnlResult] = calculate_match_pnl(matches, trades_by_id)
     # Sum realized_pnl for SELL 2
-    total_realized_pnl = sum(m['realized_pnl'] for m in match_results if m['sell_id'] == 2)
+    total_realized_pnl: int = sum(m['realized_pnl'] for m in match_results if m['sell_id'] == 2)
     # Direct calculation for SELL 2 (all 6 shares)
-    buy_cost = 6 * trades_by_id[1]['price']
-    sell_value = 6 * trades_by_id[2]['price']
-    buy_brokerage = trades_by_id[1]['brokerage']
-    sell_brokerage = trades_by_id[2]['brokerage']
-    direct_realized_pnl = sell_value - buy_cost - buy_brokerage - sell_brokerage
+    buy_cost: int = 6 * trades_by_id[1]['price']
+    sell_value: int = 6 * trades_by_id[2]['price']
+    buy_brokerage: int = trades_by_id[1]['brokerage']
+    sell_brokerage: int = trades_by_id[2]['brokerage']
+    direct_realized_pnl: int = sell_value - buy_cost - buy_brokerage - sell_brokerage
     print(f"Sum of realized_pnl for SELL 2: {total_realized_pnl}")
     print(f"Direct realized P/L for SELL 2: {direct_realized_pnl}")
     assert total_realized_pnl == direct_realized_pnl, "Invariant failed: per-match sum != direct SELL P/L"
