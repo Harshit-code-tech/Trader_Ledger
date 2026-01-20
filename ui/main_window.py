@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 from ui.add_trade_tab import AddTradeTab
 from ui.view_records_tab import ViewRecordsTab
+from ui.reports_tab import ReportsTab
 from core.logger import get_logger
 
 logger = get_logger('ui.main_window')
@@ -42,12 +43,15 @@ class TraderLedgerApp:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
         
+        # Bind tab selection event
+        self.notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
+        
         # Create tabs
         self.create_tabs()
         logger.info("Main window initialized successfully")
     
     def create_tabs(self) -> None:
-        """Create all tabs. Phase 2: Add Trade + View Records functional."""
+        """Create all tabs. Phase 3: All tabs functional."""
         
         # Tab 1: Add Trade (Phase 1 - functional)
         add_trade_frame = ttk.Frame(self.notebook)
@@ -59,16 +63,20 @@ class TraderLedgerApp:
         self.notebook.add(view_records_frame, text="  View Records  ")
         self.view_records_tab = ViewRecordsTab(view_records_frame, self.update_status)
         
-        # Tab 3: Reports (Phase 3 - placeholder)
+        # Tab 3: Reports (Phase 3 - functional)
         reports_frame = ttk.Frame(self.notebook)
         self.notebook.add(reports_frame, text="  Reports  ")
-        placeholder3 = ttk.Label(
-            reports_frame,
-            text="Profit/Loss Reports\n\n(Coming in Phase 3)",
-            font=('Arial', 14),
-            justify='center'
-        )
-        placeholder3.pack(expand=True)
+        self.reports_tab = ReportsTab(reports_frame, self.update_status)
+    
+    def on_tab_changed(self, event) -> None:
+        """Handle tab selection changes."""
+        selected_tab = self.notebook.select()
+        tab_index = self.notebook.index(selected_tab)
+        
+        # If Reports tab is selected, trigger recalculation
+        if tab_index == 2:  # Reports is the 3rd tab (index 2)
+            logger.debug("Reports tab selected - triggering recalculation")
+            self.reports_tab.on_tab_selected()
     
     def update_status(self, message: str) -> None:
         """Update status bar message."""
