@@ -6,6 +6,19 @@ import sys
 
 DB_PATH = 'data/trades.db'
 
+def get_equities(trades_by_id: dict[int, TradeDict]) -> list[str]:
+    """
+    Extract unique equity symbols from trades, sorted alphabetically.
+    Useful for UI dropdowns and report filters.
+    
+    Args:
+        trades_by_id: Dictionary of trade ID to TradeDict
+        
+    Returns:
+        Sorted list of unique equity symbols
+    """
+    return sorted({t['equity'] for t in trades_by_id.values()})
+
 def build_trades_by_id(trades: list[TradeTuple]) -> dict[int, TradeDict]:
     return {t[0]: TradeDict(
         id=t[0],

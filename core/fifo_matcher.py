@@ -37,9 +37,26 @@ def fetch_active_trades() -> list[TradeTuple]:
     trades = cursor.fetchall()
     conn.close()
     
-    # Validate fetched trades
+    # Normalize and validate fetched trades
+    normalized_trades: list[TradeTuple] = []
+    
     for trade in trades:
-        trade_id, _trade_date, equity, trade_type, quantity, price, brokerage, _notes, _is_active = trade
+        trade_id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active = trade
+        
+        # Normalize equity (strip whitespace and uppercase)
+        equity = equity.strip().upper()
+        
+        # Validate equity field
+        if not equity:
+            raise FifoMatchError(
+                f"\n{'='*60}\n"
+                f"INVALID EQUITY FIELD\n"
+                f"{'='*60}\n"
+                f"Trade ID: {trade_id}\n"
+                f"Equity field is empty or missing after normalization.\n"
+                f"Every trade must specify a stock symbol (e.g., 'TCS', 'RELIANCE').\n"
+                f"{'='*60}"
+            )
         
         # Check for invalid trade types
         if trade_type not in ('BUY', 'SELL'):
@@ -95,8 +112,11 @@ def fetch_active_trades() -> list[TradeTuple]:
                 f"\n💡 Brokerage cannot be negative.\n"
                 f"{'='*60}"
             )
+        
+        # Add normalized trade to list
+        normalized_trades.append((trade_id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active))
     
-    return trades
+    return normalized_trades
 
 
 def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[MatchRecord] | None:
