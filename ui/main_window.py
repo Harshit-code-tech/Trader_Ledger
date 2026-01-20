@@ -68,7 +68,7 @@ class TraderLedgerApp:
         self.notebook.add(reports_frame, text="  Reports  ")
         self.reports_tab = ReportsTab(reports_frame, self.update_status)
     
-    def on_tab_changed(self, event) -> None:
+    def on_tab_changed(self, event: tk.Event) -> None:  # type: ignore
         """Handle tab selection changes."""
         selected_tab = self.notebook.select()
         tab_index = self.notebook.index(selected_tab)

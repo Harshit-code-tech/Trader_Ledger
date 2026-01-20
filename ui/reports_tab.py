@@ -313,7 +313,7 @@ class ReportsTab:
             # Step 2: Run FIFO matching
             logger.info("Step 2: Running FIFO matching")
             matches = match_fifo(trades)
-            logger.info(f"Generated {len(matches)} FIFO matches")
+            logger.info(f"Generated {len(matches) if matches else 0} FIFO matches")
             
             if not matches:
                 logger.warning("No FIFO matches generated (all BUYs, no SELLs?)")
@@ -450,7 +450,7 @@ class ReportsTab:
         
         # Handle empty state
         if not data_dict:
-            empty_item = self.pnl_tree.insert('', 'end', values=(
+            _ = self.pnl_tree.insert('', 'end', values=(
                 "No realized P/L in this period",
                 "",
                 "",

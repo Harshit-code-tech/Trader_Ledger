@@ -23,7 +23,7 @@ def main():
     
     try:
         root = tk.Tk()
-        app = TraderLedgerApp(root)
+        _ = TraderLedgerApp(root)  # Keep reference to prevent garbage collection
     
         # Center window on screen
         root.update_idletasks()

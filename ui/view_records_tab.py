@@ -16,8 +16,8 @@ Does NOT:
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
-from datetime import date, datetime
+from tkinter import ttk, messagebox
+from datetime import datetime
 import sqlite3
 import csv
 from pathlib import Path
@@ -25,14 +25,16 @@ from typing import Callable, Optional
 from core.logger import get_logger
 from core.utils import format_money
 
+logger = get_logger('ui.view_records_tab')
+
+CALENDAR_AVAILABLE: bool
 try:
-    from tkcalendar import DateEntry
+    from tkcalendar import DateEntry  # type: ignore
     CALENDAR_AVAILABLE = True
 except ImportError:
+    DateEntry = None  # type: ignore
     CALENDAR_AVAILABLE = False
     logger.warning("tkcalendar not installed - using text entry for dates")
-
-logger = get_logger('ui.view_records_tab')
 
 
 class ViewRecordsTab:
@@ -461,7 +463,7 @@ class ViewRecordsTab:
         self.show_deleted_trades.set(False)
         self.refresh_records()
     
-    def on_select(self, event) -> None:
+    def on_select(self, event: tk.Event) -> None:  # type: ignore
         """Handle row selection."""
         selection = self.records_tree.selection()
         if selection:
@@ -521,7 +523,7 @@ class ViewRecordsTab:
                 return
             
             # Open edit dialog
-            EditTradeDialog(self.parent, trade_id, trade, self.refresh_records, self.update_status)
+            EditTradeDialog(self.parent, int(trade_id), trade, self.refresh_records, self.update_status)
             
         except Exception as e:
             logger.error(f"Failed to load trade for editing: {str(e)}", exc_info=True)
@@ -568,7 +570,7 @@ class ViewRecordsTab:
             messagebox.showerror("Error", f"Failed to delete trade:\n{str(e)}")
             self.update_status("❌ Error deleting trade")
     
-    def on_double_click(self, event) -> None:
+    def on_double_click(self, event: tk.Event) -> None:  # type: ignore
         """Handle double-click for inline editing."""
         # Identify column and item
         region = self.records_tree.identify_region(event.x, event.y)
@@ -781,10 +783,11 @@ class ViewRecordsTab:
             # Style header
             header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
             header_font = Font(bold=True, color="FFFFFF")
-            for cell in ws[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal="center")
+            if ws:  # Type guard for openpyxl worksheet
+                for cell in ws[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center")
             
             # Data rows
             for row in rows:
@@ -922,7 +925,7 @@ class EditTradeDialog:
         self.dialog.grab_set()
         
         # Unpack trade data
-        trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, is_active = trade_data
+        trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, _ = trade_data
         
         # Convert for display
         price_rupees = price_paise / 100

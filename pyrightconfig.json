@@ -1,0 +1,29 @@
+{
+  "include": [
+    "core",
+    "ui",
+    "app.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.venv",
+    "**/venv"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportMissingTypeArgument": false,
+  "reportUnusedVariable": "warning",
+  "reportUnusedImport": "warning",
+  "reportConstantRedefinition": false,
+  "reportAttributeAccessIssue": false,
+  "reportGeneralTypeIssues": false,
+  "reportOptionalMemberAccess": false,
+  "reportOptionalCall": false,
+  "reportUnknownLambdaType": false,
+  "pythonVersion": "3.12"
+}

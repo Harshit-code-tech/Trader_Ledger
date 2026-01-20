@@ -231,7 +231,7 @@ class AddTradeTab:
         try:
             # Parse DD-MM-YYYY format
             day, month, year = date_str.split('-')
-            date_obj = date(int(year), int(month), int(day))
+            _ = date(int(year), int(month), int(day))  # Validates the date
         except (ValueError, IndexError) as e:
             logger.warning(f"Validation failed: Invalid date format '{date_str}' - {str(e)}")
             return False, "Invalid date format. Use DD-MM-YYYY"
