@@ -20,6 +20,7 @@ class PnlResult(TypedDict):
 class TradeDict(TypedDict):
     id: int
     trade_date: str
+    equity: str
     trade_type: str
     quantity: int
     price: int

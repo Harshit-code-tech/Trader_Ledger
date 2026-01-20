@@ -8,6 +8,7 @@ class PnlCalculationError(Exception):
 class TradeDict(TypedDict):
     id: int
     trade_date: str
+    equity: str
     trade_type: str
     quantity: int
     price: int
@@ -20,6 +21,7 @@ class MatchRecord(TypedDict):
     sell_id: int
     buy_id: int
     matched_quantity: int
+    equity: str
 
 
 class PnlResult(TypedDict):
@@ -42,8 +44,25 @@ def allocate_brokerage(total_brokerage: int, total_quantity: int, match_quantiti
     Asserts sum(match_quantities) == total_quantity.
     Returns a list of allocated brokerage (int, paise) for each match.
     """
-    if sum(match_quantities) != total_quantity:
-        raise PnlCalculationError(f"Sum of match quantities ({sum(match_quantities)}) does not equal trade quantity ({total_quantity})")
+    match_sum = sum(match_quantities)
+    if match_sum != total_quantity:
+        raise PnlCalculationError(
+            f"\n{'='*60}\n"
+            f"BROKERAGE ALLOCATION ERROR\n"
+            f"{'='*60}\n"
+            f"Sum of match quantities: {match_sum}\n"
+            f"Expected trade quantity: {total_quantity}\n"
+            f"Difference: {abs(match_sum - total_quantity)}\n"
+            f"\n💡 This indicates a mismatch in FIFO matching logic.\n"
+            f"The matched quantities don't add up to the trade quantity.\n"
+            f"{'='*60}"
+        )
+    
+    if total_quantity <= 0:
+        raise PnlCalculationError(
+            f"Invalid trade quantity: {total_quantity}. Quantity must be positive."
+        )
+    
     allocations: list[int] = [
         (total_brokerage * qty) // total_quantity
         for qty in match_quantities
@@ -63,12 +82,32 @@ def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, Trad
     Raises PnlCalculationError if any buy_id or sell_id is missing from trades_by_id.
     """
     from collections import defaultdict
-    # Check all buy_id and sell_id exist in trades_by_id
+    
+    # Validate all trade IDs exist
+    missing_buys: list[int] = []
+    missing_sells: list[int] = []
+    
     for match in matches:
         if match['buy_id'] not in trades_by_id:
-            raise PnlCalculationError(f"BUY trade_id {match['buy_id']} not found in trades_by_id.")
+            missing_buys.append(match['buy_id'])
         if match['sell_id'] not in trades_by_id:
-            raise PnlCalculationError(f"SELL trade_id {match['sell_id']} not found in trades_by_id.")
+            missing_sells.append(match['sell_id'])
+    
+    if missing_buys or missing_sells:
+        error_msg = f"\n{'='*60}\nMISSING TRADE DATA\n{'='*60}\n"
+        if missing_buys:
+            error_msg += f"Missing BUY trade IDs: {', '.join(map(str, set(missing_buys)))}\n"
+        if missing_sells:
+            error_msg += f"Missing SELL trade IDs: {', '.join(map(str, set(missing_sells)))}\n"
+        error_msg += (
+            f"\n💡 Suggestions:\n"
+            f"  1. Verify all trades exist in the database\n"
+            f"  2. Check if trades were deleted or marked inactive\n"
+            f"  3. Ensure FIFO matcher returned valid trade IDs\n"
+            f"{'='*60}"
+        )
+        raise PnlCalculationError(error_msg)
+    
     # Group matches by buy_id and sell_id for brokerage allocation
     buy_matches: defaultdict[int, list[int]] = defaultdict(list)
     sell_matches: defaultdict[int, list[int]] = defaultdict(list)
@@ -137,13 +176,13 @@ if __name__ == '__main__':
     # Example trades and matches
     # All values in paise
     trades_by_id: dict[int, TradeDict] = {
-        1: TradeDict(id=1, trade_date='2026-01-15', trade_type='BUY', quantity=10, price=1000, brokerage=10, notes='', is_active=1),
-        2: TradeDict(id=2, trade_date='2026-01-15', trade_type='SELL', quantity=6, price=1200, brokerage=6, notes='', is_active=1),
+        1: TradeDict(id=1, trade_date='2026-01-15', equity='TCS', trade_type='BUY', quantity=10, price=1000, brokerage=10, notes='', is_active=1),
+        2: TradeDict(id=2, trade_date='2026-01-15', equity='TCS', trade_type='SELL', quantity=6, price=1200, brokerage=6, notes='', is_active=1),
     }
     # SELL 2 matches BUY 1 in two lots: 4 and 2
     matches: list[MatchRecord] = [
-        MatchRecord(sell_id=2, buy_id=1, matched_quantity=4),
-        MatchRecord(sell_id=2, buy_id=1, matched_quantity=2),
+        MatchRecord(sell_id=2, buy_id=1, matched_quantity=4, equity='TCS'),
+        MatchRecord(sell_id=2, buy_id=1, matched_quantity=2, equity='TCS'),
     ]
     # Calculate per-match P/L
     match_results: list[PnlResult] = calculate_match_pnl(matches, trades_by_id)
