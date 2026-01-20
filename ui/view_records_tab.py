@@ -19,6 +19,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from datetime import date, datetime
 import sqlite3
+import csv
+from pathlib import Path
 from typing import Callable, Optional
 from core.logger import get_logger
 
@@ -33,6 +35,7 @@ class ViewRecordsTab:
         self.parent = parent
         self.update_status = status_callback
         self.selected_trade_id: Optional[int] = None
+        self.show_deleted_trades = tk.BooleanVar(value=False)
         
         # Create UI
         self.create_widgets()
@@ -87,11 +90,14 @@ class ViewRecordsTab:
         self.type_filter.pack(side='left', padx=(0, 20))
         self.type_filter.set("All")
         
-        # Status filter
-        ttk.Label(row1, text="Status:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
-        self.status_filter = ttk.Combobox(row1, width=10, state='readonly', values=["Active", "Deleted", "All"])
-        self.status_filter.pack(side='left', padx=(0, 20))
-        self.status_filter.set("Active")
+        # Show deleted toggle
+        self.show_deleted_check = ttk.Checkbutton(
+            row1,
+            text="Show Deleted",
+            variable=self.show_deleted_trades,
+            command=self.refresh_records
+        )
+        self.show_deleted_check.pack(side='left', padx=(0, 20))
         
         # Apply button
         ttk.Button(row1, text="Apply Filters", command=self.apply_filters, width=12).pack(side='left', padx=10)
@@ -155,11 +161,14 @@ class ViewRecordsTab:
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
         
-        # Bind double-click to edit
-        self.records_tree.bind('<Double-Button-1>', lambda e: self.edit_selected_trade())
+        # Bind double-click to inline edit
+        self.records_tree.bind('<Double-Button-1>', self.on_double_click)
         
         # Bind selection
         self.records_tree.bind('<<TreeviewSelect>>', self.on_select)
+        
+        # Bind mousewheel for scrolling
+        self.records_tree.bind('<MouseWheel>', lambda e: self.records_tree.yview_scroll(int(-1*(e.delta/120)), "units"))
     
     def create_button_section(self, parent: ttk.Frame) -> None:
         """Create action buttons."""
@@ -176,7 +185,7 @@ class ViewRecordsTab:
         
         ttk.Button(
             button_frame,
-            text="Edit Trade",
+            text="✏️ Edit Trade",
             command=self.edit_selected_trade,
             width=15
         ).pack(side='left', padx=5)
@@ -185,6 +194,23 @@ class ViewRecordsTab:
             button_frame,
             text="Delete Trade",
             command=self.delete_selected_trade,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        # Separator
+        ttk.Separator(button_frame, orient='vertical').pack(side='left', fill='y', padx=10)
+        
+        ttk.Button(
+            button_frame,
+            text="💾 Export CSV",
+            command=self.export_to_csv,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="📄 Export Excel",
+            command=self.export_to_excel,
             width=15
         ).pack(side='left', padx=5)
         
@@ -237,12 +263,10 @@ class ViewRecordsTab:
                 query += " AND trade_type = ?"
                 params.append(type_filter)
             
-            status_filter = self.status_filter.get()
-            if status_filter == "Active":
-                query += " AND is_active = 1"
-            elif status_filter == "Deleted":
-                query += " AND is_active = 0"
-            # "All" doesn't add any condition
+            # Apply deleted filter based on checkbox
+            if not self.show_deleted_trades.get():
+                query += " AND is_active = 1"  # Only show active trades
+            # If checkbox is checked, show all (active + deleted)
             
             query += " ORDER BY id DESC"
             
@@ -310,7 +334,7 @@ class ViewRecordsTab:
     
     def apply_filters(self) -> None:
         """Apply current filters and refresh."""
-        logger.info(f"Applying filters - Equity: {self.equity_filter.get()}, Type: {self.type_filter.get()}, Status: {self.status_filter.get()}")
+        logger.info(f"Applying filters - Equity: {self.equity_filter.get()}, Type: {self.type_filter.get()}, Show Deleted: {self.show_deleted_trades.get()}")
         self.refresh_records()
     
     def clear_filters(self) -> None:
@@ -318,7 +342,7 @@ class ViewRecordsTab:
         logger.info("Clearing all filters")
         self.equity_filter.set("All")
         self.type_filter.set("All")
-        self.status_filter.set("Active")
+        self.show_deleted_trades.set(False)
         self.refresh_records()
     
     def on_select(self, event) -> None:
@@ -427,6 +451,252 @@ class ViewRecordsTab:
             logger.error(f"Failed to delete trade: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to delete trade:\n{str(e)}")
             self.update_status("❌ Error deleting trade")
+    
+    def on_double_click(self, event) -> None:
+        """Handle double-click for inline editing."""
+        # Identify column and item
+        region = self.records_tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+        
+        column = self.records_tree.identify_column(event.x)
+        item = self.records_tree.identify_row(event.y)
+        
+        if not item:
+            return
+        
+        # Get column name
+        col_index = int(column[1:]) - 1  # #1 -> 0, #2 -> 1, etc.
+        columns = ('ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status')
+        col_name = columns[col_index]
+        
+        # Don't allow editing ID or Status columns
+        if col_name in ('ID', 'Status'):
+            logger.debug(f"Inline edit: Column {col_name} is readonly")
+            return
+        
+        # Check if trade is deleted
+        values = self.records_tree.item(item, 'values')
+        if values[8] == "Deleted":  # Status column
+            messagebox.showwarning("Cannot Edit", "Cannot edit a deleted trade.")
+            return
+        
+        logger.info(f"Inline edit: Starting edit for item {item}, column {col_name}")
+        self.start_inline_edit(item, col_index, col_name)
+    
+    def start_inline_edit(self, item: str, col_index: int, col_name: str) -> None:
+        """Start inline editing of a cell."""
+        # Get cell position
+        bbox = self.records_tree.bbox(item, col_index)
+        if not bbox:
+            return
+        
+        x, y, width, height = bbox
+        current_value = self.records_tree.item(item, 'values')[col_index]
+        
+        # Remove currency symbols for editing
+        if col_name in ('Price', 'Brokerage'):
+            current_value = current_value.replace('₹', '').strip()
+        
+        # Create entry widget for inline editing
+        if col_name == 'Notes':
+            # For Notes, use a larger entry
+            edit_entry = ttk.Entry(self.records_tree, width=40)
+        elif col_name == 'Type':
+            # For Type, use combobox
+            edit_entry = ttk.Combobox(self.records_tree, width=10, values=['BUY', 'SELL'], state='readonly')
+        else:
+            edit_entry = ttk.Entry(self.records_tree)
+        
+        edit_entry.insert(0, current_value)
+        edit_entry.select_range(0, tk.END)
+        edit_entry.place(x=x, y=y, width=width, height=height)
+        edit_entry.focus()
+        
+        # Save on Enter or focus loss
+        def save_edit(event=None):
+            new_value = edit_entry.get()
+            edit_entry.destroy()
+            self.update_inline_edit(item, col_index, col_name, new_value)
+        
+        def cancel_edit(event=None):
+            edit_entry.destroy()
+        
+        edit_entry.bind('<Return>', save_edit)
+        edit_entry.bind('<FocusOut>', save_edit)
+        edit_entry.bind('<Escape>', cancel_edit)
+    
+    def update_inline_edit(self, item: str, col_index: int, col_name: str, new_value: str) -> None:
+        """Update database with inline edited value."""
+        try:
+            values = self.records_tree.item(item, 'values')
+            trade_id = values[0]
+            
+            logger.info(f"Inline edit: Updating trade ID {trade_id}, column {col_name} to '{new_value}'")
+            
+            # Map column name to database field
+            column_map = {
+                'Date': ('trade_date', 'date'),
+                'Stock': ('equity', 'text'),
+                'Type': ('trade_type', 'text'),
+                'Qty': ('quantity', 'int'),
+                'Price': ('price', 'money'),
+                'Brokerage': ('brokerage', 'money'),
+                'Notes': ('notes', 'text')
+            }
+            
+            if col_name not in column_map:
+                return
+            
+            db_field, value_type = column_map[col_name]
+            
+            # Convert value based on type
+            if value_type == 'date':
+                # DD-MM-YYYY -> YYYY-MM-DD
+                day, month, year = new_value.split('-')
+                db_value = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            elif value_type == 'int':
+                db_value = int(new_value)
+            elif value_type == 'money':
+                # Convert rupees to paise
+                db_value = int(float(new_value) * 100)
+            elif value_type == 'text':
+                db_value = new_value.strip().upper() if col_name in ('Stock', 'Type') else new_value.strip()
+            else:
+                db_value = new_value
+            
+            # Update database
+            conn = sqlite3.connect('data/trades.db')
+            c = conn.cursor()
+            c.execute(f"UPDATE trade_events SET {db_field} = ? WHERE id = ?", (db_value, trade_id))
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"✅ Inline edit: Trade ID {trade_id} updated successfully")
+            self.update_status(f"✅ Updated trade #{trade_id}")
+            
+            # Refresh display
+            self.refresh_records()
+            
+        except Exception as e:
+            logger.error(f"Inline edit failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Error", f"Failed to update:\n{str(e)}")
+    
+    def export_to_csv(self) -> None:
+        """Export current filtered records to CSV."""
+        logger.info("Exporting records to CSV")
+        
+        try:
+            # Get timestamp for filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"trades_export_{timestamp}.csv"
+            filepath = Path("data") / "exports" / filename
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Get all displayed rows
+            rows = []
+            for item in self.records_tree.get_children():
+                values = self.records_tree.item(item, 'values')
+                rows.append(values)
+            
+            if not rows:
+                messagebox.showwarning("No Data", "No records to export")
+                return
+            
+            # Write CSV
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Header
+                writer.writerow(['ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status'])
+                # Data
+                writer.writerows(rows)
+            
+            logger.info(f"✅ Exported {len(rows)} records to {filepath}")
+            self.update_status(f"✅ Exported to {filename}")
+            messagebox.showinfo("Export Successful", f"Exported {len(rows)} records to:\n{filepath}")
+            
+        except Exception as e:
+            logger.error(f"CSV export failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Export Failed", f"Failed to export CSV:\n{str(e)}")
+    
+    def export_to_excel(self) -> None:
+        """Export current filtered records to Excel."""
+        logger.info("Exporting records to Excel")
+        
+        try:
+            # Try importing openpyxl
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, PatternFill, Alignment
+            except ImportError:
+                logger.warning("openpyxl not installed")
+                messagebox.showerror(
+                    "Missing Dependency",
+                    "openpyxl is required for Excel export.\n\n"
+                    "Install it with:\npip install openpyxl"
+                )
+                return
+            
+            # Get timestamp for filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"trades_export_{timestamp}.xlsx"
+            filepath = Path("data") / "exports" / filename
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Get all displayed rows
+            rows = []
+            for item in self.records_tree.get_children():
+                values = self.records_tree.item(item, 'values')
+                rows.append(values)
+            
+            if not rows:
+                messagebox.showwarning("No Data", "No records to export")
+                return
+            
+            # Create workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Trades"
+            
+            # Header row
+            headers = ['ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status']
+            ws.append(headers)
+            
+            # Style header
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+            
+            # Data rows
+            for row in rows:
+                ws.append(row)
+            
+            # Auto-width columns
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            # Save
+            wb.save(filepath)
+            
+            logger.info(f"✅ Exported {len(rows)} records to {filepath}")
+            self.update_status(f"✅ Exported to {filename}")
+            messagebox.showinfo("Export Successful", f"Exported {len(rows)} records to:\n{filepath}")
+            
+        except Exception as e:
+            logger.error(f"Excel export failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Export Failed", f"Failed to export Excel:\n{str(e)}")
 
 
 class EditTradeDialog:

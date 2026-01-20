@@ -62,6 +62,22 @@ def aggregate_pnl_by_date(match_results: list[PnlResult], trades_by_id: dict[int
 
 
 
+def aggregate_pnl_by_week(date_totals: dict[str, int]) -> dict[str, int]:
+    """
+    Input: dict of 'YYYY-MM-DD' -> P/L
+    Output: dict of 'YYYY-Www' -> total P/L for that week (ISO week number)
+    """
+    from datetime import datetime
+    week_totals: defaultdict[str, int] = defaultdict(int)
+    for date_str, pnl in date_totals.items():
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        # ISO week: year + week number
+        iso_year, iso_week, _ = dt.isocalendar()
+        week_key: str = f"{iso_year}-W{iso_week:02d}"
+        week_totals[week_key] += pnl
+    return dict(week_totals)
+
+
 def aggregate_pnl_by_month(date_totals: dict[str, int]) -> dict[str, int]:
     """
     Input: dict of 'YYYY-MM-DD' -> P/L
@@ -72,6 +88,18 @@ def aggregate_pnl_by_month(date_totals: dict[str, int]) -> dict[str, int]:
         month_key: str = date_str[:7]  # 'YYYY-MM'
         month_totals[month_key] += pnl
     return dict(month_totals)
+
+
+def aggregate_pnl_by_year(month_totals: dict[str, int]) -> dict[str, int]:
+    """
+    Input: dict of 'YYYY-MM' -> P/L
+    Output: dict of 'YYYY' -> total P/L for that year
+    """
+    year_totals: defaultdict[str, int] = defaultdict(int)
+    for month_str, pnl in month_totals.items():
+        year_key: str = month_str[:4]  # 'YYYY'
+        year_totals[year_key] += pnl
+    return dict(year_totals)
 
 
 
