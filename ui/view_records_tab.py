@@ -25,6 +25,13 @@ from typing import Callable, Optional
 from core.logger import get_logger
 from core.utils import format_money
 
+try:
+    from tkcalendar import DateEntry
+    CALENDAR_AVAILABLE = True
+except ImportError:
+    CALENDAR_AVAILABLE = False
+    logger.warning("tkcalendar not installed - using text entry for dates")
+
 logger = get_logger('ui.view_records_tab')
 
 
@@ -107,17 +114,48 @@ class ViewRecordsTab:
         # Row 2: Date Range Filter
         row2 = ttk.Frame(filter_frame)
         row2.pack(fill='x', pady=5)
+        
         ttk.Label(row2, text="From:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
-        self.date_from_entry = ttk.Entry(row2, width=12)
-        self.date_from_entry.pack(side='left', padx=(0, 5))
-        self.date_from_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_from_entry))
-        ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left', padx=(0, 15))
+        
+        if CALENDAR_AVAILABLE:
+            # Use calendar picker
+            self.date_from_entry = DateEntry(
+                row2,
+                width=12,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='dd-mm-yyyy',
+                font=('Arial', 9)
+            )
+            self.date_from_entry.pack(side='left', padx=(0, 15))
+        else:
+            # Fallback to text entry
+            self.date_from_entry = ttk.Entry(row2, width=12)
+            self.date_from_entry.pack(side='left', padx=(0, 5))
+            self.date_from_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_from_entry))
+            ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left', padx=(0, 15))
         
         ttk.Label(row2, text="To:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
-        self.date_to_entry = ttk.Entry(row2, width=12)
-        self.date_to_entry.pack(side='left', padx=(0, 5))
-        self.date_to_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_to_entry))
-        ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left')
+        
+        if CALENDAR_AVAILABLE:
+            # Use calendar picker
+            self.date_to_entry = DateEntry(
+                row2,
+                width=12,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='dd-mm-yyyy',
+                font=('Arial', 9)
+            )
+            self.date_to_entry.pack(side='left')
+        else:
+            # Fallback to text entry
+            self.date_to_entry = ttk.Entry(row2, width=12)
+            self.date_to_entry.pack(side='left', padx=(0, 5))
+            self.date_to_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_to_entry))
+            ttk.Label(row2, text="(DD-MM-YYYY)", font=('Arial', 8), foreground='gray').pack(side='left')
     
     def create_table_section(self, parent: ttk.Frame) -> None:
         """Create table to display records."""
@@ -411,8 +449,15 @@ class ViewRecordsTab:
         logger.info("Clearing all filters")
         self.equity_filter.set("All")
         self.type_filter.set("All")
-        self.date_from_entry.delete(0, tk.END)
-        self.date_to_entry.delete(0, tk.END)
+        
+        # Clear date fields (handle both DateEntry and Entry widgets)
+        if CALENDAR_AVAILABLE:
+            self.date_from_entry.set_date('')  # Clear DateEntry
+            self.date_to_entry.set_date('')
+        else:
+            self.date_from_entry.delete(0, tk.END)
+            self.date_to_entry.delete(0, tk.END)
+        
         self.show_deleted_trades.set(False)
         self.refresh_records()
     
