@@ -1,0 +1,12 @@
+# Trader Ledger - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Runtime dependencies (required for application)
+tkcalendar>=1.6.1
+
+# Build dependencies (only needed to create .exe installer)
+pyinstaller>=5.0
+pillow>=10.0.0
+
+# Note: tkinter comes with Python standard library
+# If tkinter is missing, install python3-tk (Linux) or reinstall Python with Tk support (Windows)
