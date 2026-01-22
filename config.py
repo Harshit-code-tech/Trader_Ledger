@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Application info
 APP_NAME = "Trader Ledger - Baba's Trading App"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_AUTHOR = "Built for Baba"
 
 # Paths

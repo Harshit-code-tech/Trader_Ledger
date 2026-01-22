@@ -33,6 +33,7 @@ if getattr(sys, 'frozen', False):
 
 from ui.main_window import TraderLedgerApp
 from core.logger import setup_logger
+from core.db_init import init_database
 
 # Initialize logger
 logger = setup_logger()
@@ -43,6 +44,16 @@ def main():
     logger.info("="*60)
     logger.info("Starting Trader Ledger Application")
     logger.info("="*60)
+    
+    # Initialize database schema if needed
+    logger.info("Checking database...")
+    if not init_database():
+        logger.error("Failed to initialize database. Please check logs.")
+        import tkinter.messagebox as mb
+        mb.showerror("Database Error", 
+                     "Failed to initialize database.\nPlease check logs for details.")
+        return
+    logger.info("Database ready")
     
     try:
         root = tk.Tk()
