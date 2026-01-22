@@ -8,6 +8,29 @@ Phase 3: Reports (coming soon)
 """
 
 import tkinter as tk
+import sys
+from pathlib import Path
+
+# Ensure data directory exists in user's AppData for installed .exe
+if getattr(sys, 'frozen', False):
+    # Running as compiled .exe
+    import os
+    APPDATA = Path(os.environ.get('APPDATA', '.'))
+    APP_DIR = APPDATA / "TraderLedger"
+    APP_DIR.mkdir(exist_ok=True)
+    (APP_DIR / "data").mkdir(exist_ok=True)
+    (APP_DIR / "logs").mkdir(exist_ok=True)
+    (APP_DIR / "data" / "exports").mkdir(exist_ok=True)
+    (APP_DIR / "data" / "backups").mkdir(exist_ok=True)
+    
+    # Change working directory to AppData location
+    os.chdir(APP_DIR)
+    
+    # Create sample CSV if it doesn't exist
+    sample_csv = APP_DIR / "data" / "sample_import.csv"
+    if not sample_csv.exists():
+        sample_csv.write_text("Date,Stock,Type,Qty,Price,Brokerage,Notes\n", encoding='utf-8')
+
 from ui.main_window import TraderLedgerApp
 from core.logger import setup_logger
 

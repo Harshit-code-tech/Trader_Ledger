@@ -521,9 +521,10 @@ class ReportsTab:
     
     def show_warning_banner(self) -> None:
         """Show warning banner at top of Reports tab."""
-        if self.has_validation_errors:
+        if self.has_validation_errors and hasattr(self, 'warning_frame'):
             self.warning_label.config(text=f"⚠️ VALIDATION ERROR: {self.validation_message}")
-            self.warning_frame.pack(fill='x', pady=(0, 10), before=self.parent.winfo_children()[1])
+            # Pack at top of main content area
+            self.warning_frame.pack(fill='x', pady=(0, 10), before=self.warning_frame.master.winfo_children()[1])
     
     def hide_warning_banner(self) -> None:
         """Hide warning banner."""
