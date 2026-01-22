@@ -87,6 +87,10 @@ class ReportsTab:
         self.monthly_pnl = {}
         self.yearly_pnl = {}
         
+        # Validation state
+        self.has_validation_errors = False
+        self.validation_message = ""
+        
         # Period selection
         self.period_var = tk.StringVar(value="Daily")
         
@@ -144,6 +148,20 @@ class ReportsTab:
         main_frame = ttk.Frame(scrollable_frame, padding="20")
         main_frame.pack(fill='both', expand=True)
         
+        # Warning banner (initially hidden)
+        self.warning_frame = ttk.Frame(main_frame)
+        self.warning_label = ttk.Label(
+            self.warning_frame,
+            text="",
+            font=('Consolas', 10, 'bold'),
+            foreground='white',
+            background='#e74c3c',
+            padding=10,
+            wraplength=800
+        )
+        self.warning_label.pack(fill='x')
+        # Don't pack warning_frame yet - will show when needed
+        
         # Header
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill='x', pady=(0, 20))
@@ -176,12 +194,13 @@ class ReportsTab:
             width=15
         ).pack(side='right', padx=5)
         
-        ttk.Button(
+        self.print_btn = ttk.Button(
             header_frame,
-            text="🖨️ Print",
+            text="\ud83d\udda8\ufe0f Print",
             command=self.print_report,
             width=12
-        ).pack(side='right', padx=5)
+        )
+        self.print_btn.pack(side='right', padx=5)
         
         # Summary Cards Section
         self.create_summary_cards(main_frame)
@@ -399,9 +418,10 @@ class ReportsTab:
             
             # Step 6: Update UI
             logger.info("Step 6: Updating UI displays")
+            self.hide_warning_banner()  # Hide warning on success
             self.update_displays()
             
-            self.update_status(f"✅ Reports calculated: Net P/L = ₹{self.net_pnl/100:.2f}")
+            self.update_status(f"✅ FIFO validated | Net P/L = ₹{self.net_pnl/100:.2f}")
             logger.info("="*60)
             logger.info("P/L report calculation completed successfully")
             logger.info("="*60)
@@ -498,6 +518,17 @@ class ReportsTab:
                 format_money(row['net']),
                 f"→ {format_money(row['accumulated'])}"
             ), tags=(tag,))
+    
+    def show_warning_banner(self) -> None:
+        """Show warning banner at top of Reports tab."""
+        if self.has_validation_errors:
+            self.warning_label.config(text=f"⚠️ VALIDATION ERROR: {self.validation_message}")
+            self.warning_frame.pack(fill='x', pady=(0, 10), before=self.parent.winfo_children()[1])
+    
+    def hide_warning_banner(self) -> None:
+        """Hide warning banner."""
+        if hasattr(self, 'warning_frame'):
+            self.warning_frame.pack_forget()
     
     def reset_displays(self) -> None:
         """Reset all displays to zero/empty state."""

@@ -280,7 +280,24 @@ class ViewRecordsTab:
         
         ttk.Button(
             button_frame,
+        
+
+            text="📥 Import CSV",
+            command=self.import_trades_csv,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="ℹ️ CSV Format",
+            command=self.show_import_format,
+            width=15
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            button_frame,
             text="💾 Export CSV",
+            
             command=self.export_to_csv,
             width=15
         ).pack(side='left', padx=5)
@@ -709,6 +726,157 @@ class ViewRecordsTab:
         except Exception as e:
             logger.error(f"Inline edit failed: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to update:\n{str(e)}")
+    
+    def show_import_format(self) -> None:
+        """Show CSV import format help."""
+        format_msg = """CSV IMPORT FORMAT
+
+Required Columns:
+• Date (DD-MM-YYYY or YYYY-MM-DD)
+• Stock (symbol, e.g., TCS, RELIANCE)
+• Type (BUY or SELL)
+• Qty (positive integer)
+• Price (in rupees, e.g., 350.50)
+
+Optional Columns:
+• Brokerage (in rupees, default 0)
+• Notes (any text)
+
+Example CSV:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Date,Stock,Type,Qty,Price,Brokerage,Notes
+20-01-2026,TCS,BUY,10,350.50,10.00,Sample trade
+21-01-2026,RELIANCE,BUY,5,280.00,8.00,Another trade
+22-01-2026,TCS,SELL,10,360.00,10.00,Profit booking
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Sample file available at:
+data/sample_import.csv
+
+Tips:
+✓ First row must be header
+✓ No empty rows
+✓ Use commas to separate values
+✓ Dates validated automatically
+✓ Errors shown after import"""
+        
+        messagebox.showinfo("CSV Import Format", format_msg)
+        logger.info("Displayed CSV import format help")
+    
+    def import_trades_csv(self) -> None:
+        """Import trades from CSV file."""
+        from tkinter import filedialog
+        
+        logger.info("Starting CSV import")
+        
+        # Ask for CSV file
+        file_path = filedialog.askopenfilename(
+            title="Select CSV file to import",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            defaultextension=".csv"
+        )
+        
+        if not file_path:
+            logger.debug("CSV import cancelled by user")
+            return
+        
+        try:
+            imported_count = 0
+            skipped_count = 0
+            error_lines = []
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                
+                # Expected columns: Date, Stock, Type, Qty, Price, Brokerage (optional), Notes (optional)
+                required_cols = ['Date', 'Stock', 'Type', 'Qty', 'Price']
+                
+                if not reader.fieldnames or not all(col in reader.fieldnames for col in required_cols):
+                    messagebox.showerror(
+                        "Invalid CSV",
+                        f"CSV must contain columns: {', '.join(required_cols)}\n\n"
+                        f"Found columns: {', '.join(reader.fieldnames or [])}"
+                    )
+                    logger.warning(f"Invalid CSV format: missing required columns")
+                    return
+                
+                conn = sqlite3.connect('data/trades.db')
+                cursor = conn.cursor()
+                
+                for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
+                    try:
+                        # Parse date (supports DD-MM-YYYY or YYYY-MM-DD)
+                        date_str = row['Date'].strip()
+                        if not date_str:
+                            raise ValueError("Date is empty")
+                        
+                        if '-' in date_str:
+                            parts = date_str.split('-')
+                            if len(parts[0]) == 4:  # YYYY-MM-DD
+                                trade_date = date_str
+                            else:  # DD-MM-YYYY
+                                day, month, year = parts
+                                trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                        else:
+                            raise ValueError(f"Invalid date format: {date_str} (use DD-MM-YYYY or YYYY-MM-DD)")
+                        
+                        equity = row['Stock'].strip().upper()
+                        if not equity:
+                            raise ValueError("Stock symbol is empty")
+                        
+                        trade_type = row['Type'].strip().upper()
+                        if trade_type not in ['BUY', 'SELL']:
+                            raise ValueError(f"Type must be BUY or SELL, got: {trade_type}")
+                        
+                        quantity = int(row['Qty'])
+                        if quantity <= 0:
+                            raise ValueError(f"Quantity must be positive, got: {quantity}")
+                        
+                        price_rupees = float(row['Price'])
+                        if price_rupees <= 0:
+                            raise ValueError(f"Price must be positive, got: {price_rupees}")
+                        price_paise = int(price_rupees * 100)
+                        
+                        brokerage_paise = 0
+                        if 'Brokerage' in row and row['Brokerage'].strip():
+                            brokerage_rupees = float(row['Brokerage'])
+                            brokerage_paise = int(brokerage_rupees * 100)
+                        
+                        notes = row.get('Notes', '').strip()
+                        
+                        # Insert into database
+                        cursor.execute("""
+                            INSERT INTO trades (trade_date, equity, trade_type, quantity, price, brokerage, notes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes))
+                        
+                        imported_count += 1
+                        
+                    except Exception as e:
+                        skipped_count += 1
+                        error_lines.append(f"Line {line_num}: {str(e)}")
+                        logger.warning(f"Skipped line {line_num}: {str(e)}")
+                
+                conn.commit()
+                conn.close()
+            
+            # Show result
+            result_msg = f"\u2705 Imported {imported_count} trades successfully"
+            if skipped_count > 0:
+                result_msg += f"\\n\\n\u26a0\ufe0f Skipped {skipped_count} rows with errors:\\n"
+                result_msg += "\\n".join(error_lines[:10])  # Show first 10 errors
+                if len(error_lines) > 10:
+                    result_msg += f"\\n... and {len(error_lines) - 10} more errors"
+            
+            messagebox.showinfo("Import Complete", result_msg)
+            self.refresh_records()
+            self.update_status(f"\u2705 Imported {imported_count} trades from CSV")
+            logger.info(f"CSV import complete: {imported_count} imported, {skipped_count} skipped")
+            
+        except Exception as e:
+            logger.error(f"Failed to import CSV: {str(e)}", exc_info=True)
+            messagebox.showerror("Import Failed", f"Failed to import CSV:\\n\\n{str(e)}")
+            self.update_status("\u274c CSV import failed")
     
     def export_to_csv(self) -> None:
         """Export current filtered records to CSV."""
