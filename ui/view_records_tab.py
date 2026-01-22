@@ -120,9 +120,12 @@ class ViewRecordsTab:
         ttk.Label(row2, text="From:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
         
         if CALENDAR_AVAILABLE:
-            # Use calendar picker
+            # Use calendar picker (start empty for filtering)
+            date_frame_from = ttk.Frame(row2)
+            date_frame_from.pack(side='left', padx=(0, 15))
+            
             self.date_from_entry = DateEntry(
-                row2,
+                date_frame_from,
                 width=12,
                 background='darkblue',
                 foreground='white',
@@ -130,9 +133,11 @@ class ViewRecordsTab:
                 date_pattern='dd-mm-yyyy',
                 font=('Arial', 9)
             )
-            self.date_from_entry.pack(side='left', padx=(0, 15))
+            self.date_from_entry.pack(side='left')
+            # Clear the default date (make it empty)
+            self.date_from_entry.delete(0, 'end')
         else:
-            # Fallback to text entry
+            # Fallback to text entry (start empty)
             self.date_from_entry = ttk.Entry(row2, width=12)
             self.date_from_entry.pack(side='left', padx=(0, 5))
             self.date_from_entry.bind('<FocusOut>', lambda e: self.validate_date_field(self.date_from_entry))
@@ -141,9 +146,12 @@ class ViewRecordsTab:
         ttk.Label(row2, text="To:", font=('Arial', 9)).pack(side='left', padx=(0, 5))
         
         if CALENDAR_AVAILABLE:
-            # Use calendar picker
+            # Use calendar picker (start empty for filtering)
+            date_frame_to = ttk.Frame(row2)
+            date_frame_to.pack(side='left')
+            
             self.date_to_entry = DateEntry(
-                row2,
+                date_frame_to,
                 width=12,
                 background='darkblue',
                 foreground='white',
@@ -152,6 +160,8 @@ class ViewRecordsTab:
                 font=('Arial', 9)
             )
             self.date_to_entry.pack(side='left')
+            # Clear the default date (make it empty)
+            self.date_to_entry.delete(0, 'end')
         else:
             # Fallback to text entry
             self.date_to_entry = ttk.Entry(row2, width=12)

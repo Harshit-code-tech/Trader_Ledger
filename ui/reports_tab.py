@@ -32,13 +32,46 @@ from core.pnl_aggregator import (
     aggregate_pnl_by_year
 )
 from core.run_ledger import build_trades_by_id  # Use engine's conversion function
-from core.utils import format_money, format_money_abs
+from core.utils import format_money, format_money_abs, format_period_label
 
 logger = get_logger('ui.reports_tab')
 
 
 class ReportsTab:
     """Reports tab - display P/L analysis with FIFO-based calculations."""
+    
+    @staticmethod
+    def build_report_rows(period_totals: dict, mode: str) -> list[dict]:
+        """
+        Normalize period data into display-ready rows.
+        
+        Args:
+            period_totals: Dict of period_key -> {profit, loss, net}
+            mode: Period type for label formatting
+        
+        Returns:
+            List of row dicts with all display values pre-calculated
+        """
+        rows = []
+        accumulated = 0
+        
+        for period_key in sorted(period_totals.keys()):
+            profit = period_totals[period_key]['profit']
+            loss = period_totals[period_key]['loss']
+            net = period_totals[period_key]['net']
+            
+            accumulated += net
+            
+            rows.append({
+                'period_key': period_key,
+                'label': format_period_label(period_key, mode),
+                'profit': profit,
+                'loss': loss,
+                'net': net,
+                'accumulated': accumulated
+            })
+        
+        return rows
     
     def __init__(self, parent: ttk.Frame, status_callback: Callable[[str], None]) -> None:
         logger.info("Initializing Reports tab")
@@ -382,24 +415,17 @@ class ReportsTab:
     def update_displays(self) -> None:
         """Update all display elements with calculated values."""
         
-        # Update summary cards with proper formatting (₹ +1,234.00 style)
-        profit_text = format_money(self.total_profit)
-        if self.total_profit > 0:
-            profit_text = profit_text.replace('₹', '₹ +')
+        # Update summary cards (format_money already adds +/- signs)
+        self.profit_label.config(text=format_money(self.total_profit))
         
-        loss_text = format_money_abs(self.total_loss)
+        # Loss should show with negative sign (e.g., ₹ -61.16)
         if self.total_loss < 0:
-            loss_text = loss_text.replace('₹', '₹ -')
+            loss_formatted = format_money_abs(self.total_loss)
+            self.loss_label.config(text=f"₹ -{loss_formatted.replace('₹', '').strip()}")
+        else:
+            self.loss_label.config(text="₹ 0.00")
         
-        net_text = format_money(self.net_pnl)
-        if self.net_pnl > 0:
-            net_text = net_text.replace('₹', '₹ +')
-        elif self.net_pnl < 0:
-            net_text = net_text.replace('₹', '₹ -')
-        
-        self.profit_label.config(text=profit_text)
-        self.loss_label.config(text=loss_text)
-        self.net_label.config(text=net_text)
+        self.net_label.config(text=format_money(self.net_pnl))
         
         # Update emotion and net P/L color
         if self.net_pnl > 0:
@@ -433,20 +459,17 @@ class ReportsTab:
             self.pnl_tree.delete(item)
         
         # Get appropriate data based on period
-        if period == "Daily":
-            data_dict = self.daily_pnl
-            format_func = self._format_date
-        elif period == "Weekly":
-            data_dict = self.weekly_pnl
-            format_func = self._format_week
-        elif period == "Monthly":
-            data_dict = self.monthly_pnl
-            format_func = self._format_month
-        elif period == "Yearly":
-            data_dict = self.yearly_pnl
-            format_func = self._format_year
-        else:
+        period_map = {
+            "Daily": (self.daily_pnl, "daily"),
+            "Weekly": (self.weekly_pnl, "weekly"),
+            "Monthly": (self.monthly_pnl, "monthly"),
+            "Yearly": (self.yearly_pnl, "yearly")
+        }
+        
+        if period not in period_map:
             return
+        
+        data_dict, mode = period_map[period]
         
         # Handle empty state
         if not data_dict:
@@ -460,206 +483,21 @@ class ReportsTab:
             self.pnl_tree.tag_configure('empty', foreground='gray')
             return
         
-        # Populate table with running total and zebra striping
-        running_total = 0
-        row_index = 0
-        for period_key, pnl_data in sorted(data_dict.items(), reverse=True):
-            profit = pnl_data['profit']
-            loss = pnl_data['loss']
-            net = pnl_data['net']
-            running_total += net
+        # Build normalized rows (data → display)
+        rows = self.build_report_rows(data_dict, mode)
+        
+        # Render rows (pure UI, no logic)
+        for idx, row in enumerate(reversed(rows)):  # Reverse for descending order
+            # Zebra striping
+            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
             
-            display_period = format_func(period_key)
-            
-            # Format values with proper +/- signs
-            profit_text = format_money(profit) if profit > 0 else "\u20b9 0.00"
-            if profit > 0:
-                profit_text = profit_text.replace('\u20b9', '\u20b9 +')
-            
-            loss_text = format_money_abs(loss) if loss < 0 else "\u20b9 0.00"
-            if loss < 0:
-                loss_text = loss_text.replace('\u20b9', '\u20b9 -')
-            
-            net_text = format_money(net)
-            if net > 0:
-                net_text = net_text.replace('\u20b9', '\u20b9 +')
-            elif net < 0:
-                net_text = net_text.replace('\u20b9', '\u20b9 -')
-            
-            acc_text = format_money(running_total)
-            if running_total > 0:
-                acc_text = acc_text.replace('\u20b9', '\u20b9 +')
-            elif running_total < 0:
-                acc_text = acc_text.replace('\u20b9', '\u20b9 -')
-                        # Add visual weight to accumulated (the answer column)
-            acc_text = f"→ {acc_text}"
-                        # Zebra striping
-            tag = 'evenrow' if row_index % 2 == 0 else 'oddrow'
-            
-            item = self.pnl_tree.insert('', 'end', values=(
-                display_period,
-                profit_text,
-                loss_text,
-                net_text,
-                acc_text
+            _ = self.pnl_tree.insert('', 'end', values=(
+                row['label'],
+                format_money(row['profit']) if row['profit'] != 0 else "\u20b9 0.00",
+                format_money(row['loss']) if row['loss'] != 0 else "\u20b9 0.00",
+                format_money(row['net']),
+                f"→ {format_money(row['accumulated'])}"
             ), tags=(tag,))
-            
-            row_index += 1
-    
-    def _format_date(self, date_str: str) -> str:
-        """Format YYYY-MM-DD to '15 Jan 2026'."""
-        year, month, day = date_str.split('-')
-        month_name = datetime.strptime(month, "%m").strftime("%b")
-        return f"{int(day)} {month_name} {year}"
-    
-    def _format_week(self, week_str: str) -> str:
-        """Format YYYY-Www to 'Week 3 (Jan 2026)'."""
-        # week_str format: 2026-W03
-        year, week = week_str.split('-W')
-        # Get first day of the week to determine month
-        from datetime import datetime, timedelta
-        # ISO week starts on Monday
-        jan4 = datetime(int(year), 1, 4)  # Jan 4 is always in week 1
-        week1_monday = jan4 - timedelta(days=jan4.weekday())
-        target_monday = week1_monday + timedelta(weeks=int(week)-1)
-        month_name = target_monday.strftime("%b")
-        return f"Week {int(week)} ({month_name} {year})"
-    
-    def _format_month(self, month_str: str) -> str:
-        """Format YYYY-MM to 'Jan 2026'."""
-        year, month = month_str.split('-')
-        month_name = datetime.strptime(month, "%m").strftime("%b")
-        return f"{month_name} {year}"
-    
-    def _format_year(self, year_str: str) -> str:
-        """Format YYYY to 'Year 2026'."""
-        return f"Year {year_str}"
-        """Update all display elements with calculated values."""
-        
-        # Update summary cards
-        self.profit_label.config(text=f"₹{self.total_profit/100:.2f}")
-        self.loss_label.config(text=f"₹{abs(self.total_loss)/100:.2f}")
-        self.net_label.config(text=f"₹{self.net_pnl/100:.2f}")
-        
-        # Update emotion and net P/L color
-        if self.net_pnl > 0:
-            self.emotion_label.config(text="🙂")  # Happy
-            self.net_label.config(foreground='green')
-        elif self.net_pnl < 0:
-            self.emotion_label.config(text="😢")  # Sad
-            self.net_label.config(foreground='red')
-        else:
-            self.emotion_label.config(text="😐")  # Neutral
-            self.net_label.config(foreground='black')
-        
-        # Update daily table
-        for item in self.daily_tree.get_children():
-            self.daily_tree.delete(item)
-        
-        for date_str, pnl_data in sorted(self.daily_pnl.items(), reverse=True):
-            profit = pnl_data['profit']
-            loss = pnl_data['loss']
-            net = pnl_data['net']
-            
-            # Format date DD-MM-YYYY
-            year, month, day = date_str.split('-')
-            display_date = f"{day}-{month}-{year}"
-            
-            item = self.daily_tree.insert('', 'end', values=(
-                display_date,
-                f"₹{profit/100:.2f}" if profit > 0 else "₹0.00",
-                f"₹{abs(loss)/100:.2f}" if loss < 0 else "₹0.00",
-                f"₹{net/100:.2f}"
-            ))
-            
-            # Color code net P/L
-            if net > 0:
-                self.daily_tree.item(item, tags=('profit',))
-            elif net < 0:
-                self.daily_tree.item(item, tags=('loss',))
-        
-        self.daily_tree.tag_configure('profit', foreground='green')
-        self.daily_tree.tag_configure('loss', foreground='red')
-        
-        # Update weekly table
-        for item in self.weekly_tree.get_children():
-            self.weekly_tree.delete(item)
-        
-        for week_str, pnl_data in sorted(self.weekly_pnl.items(), reverse=True):
-            profit = pnl_data['profit']
-            loss = pnl_data['loss']
-            net = pnl_data['net']
-            
-            item = self.weekly_tree.insert('', 'end', values=(
-                week_str,
-                f"₹{profit/100:.2f}" if profit > 0 else "₹0.00",
-                f"₹{abs(loss)/100:.2f}" if loss < 0 else "₹0.00",
-                f"₹{net/100:.2f}"
-            ))
-            
-            # Color code net P/L
-            if net > 0:
-                self.weekly_tree.item(item, tags=('profit',))
-            elif net < 0:
-                self.weekly_tree.item(item, tags=('loss',))
-        
-        self.weekly_tree.tag_configure('profit', foreground='green')
-        self.weekly_tree.tag_configure('loss', foreground='red')
-        
-        # Update monthly table
-        for item in self.monthly_tree.get_children():
-            self.monthly_tree.delete(item)
-        
-        for month_str, pnl_data in sorted(self.monthly_pnl.items(), reverse=True):
-            profit = pnl_data['profit']
-            loss = pnl_data['loss']
-            net = pnl_data['net']
-            
-            # Format month YYYY-MM -> MMM YYYY
-            year, month = month_str.split('-')
-            month_name = datetime.strptime(month, "%m").strftime("%b")
-            display_month = f"{month_name} {year}"
-            
-            item = self.monthly_tree.insert('', 'end', values=(
-                display_month,
-                f"₹{profit/100:.2f}" if profit > 0 else "₹0.00",
-                f"₹{abs(loss)/100:.2f}" if loss < 0 else "₹0.00",
-                f"₹{net/100:.2f}"
-            ))
-            
-            # Color code net P/L
-            if net > 0:
-                self.monthly_tree.item(item, tags=('profit',))
-            elif net < 0:
-                self.monthly_tree.item(item, tags=('loss',))
-        
-        self.monthly_tree.tag_configure('profit', foreground='green')
-        self.monthly_tree.tag_configure('loss', foreground='red')
-        
-        # Update yearly table
-        for item in self.yearly_tree.get_children():
-            self.yearly_tree.delete(item)
-        
-        for year_str, pnl_data in sorted(self.yearly_pnl.items(), reverse=True):
-            profit = pnl_data['profit']
-            loss = pnl_data['loss']
-            net = pnl_data['net']
-            
-            item = self.yearly_tree.insert('', 'end', values=(
-                year_str,
-                f"₹{profit/100:.2f}" if profit > 0 else "₹0.00",
-                f"₹{abs(loss)/100:.2f}" if loss < 0 else "₹0.00",
-                f"₹{net/100:.2f}"
-            ))
-            
-            # Color code net P/L
-            if net > 0:
-                self.yearly_tree.item(item, tags=('profit',))
-            elif net < 0:
-                self.yearly_tree.item(item, tags=('loss',))
-        
-        self.yearly_tree.tag_configure('profit', foreground='green')
-        self.yearly_tree.tag_configure('loss', foreground='red')
     
     def reset_displays(self) -> None:
         """Reset all displays to zero/empty state."""

@@ -26,6 +26,15 @@ from core.utils import format_money
 
 logger = get_logger('ui.add_trade_tab')
 
+CALENDAR_AVAILABLE: bool
+try:
+    from tkcalendar import DateEntry  # type: ignore
+    CALENDAR_AVAILABLE = True
+except ImportError:
+    DateEntry = None  # type: ignore
+    CALENDAR_AVAILABLE = False
+    logger.warning("tkcalendar not installed - using text entry for dates")
+
 
 class AddTradeTab:
     """Add Trade tab - allows user to input and save trades."""
@@ -38,9 +47,11 @@ class AddTradeTab:
         # Create UI
         self.create_widgets()
         
-        # Set default date to today
-        self.date_entry.insert(0, date.today().strftime('%d-%m-%Y'))
-        logger.debug("Add Trade tab initialized with default date")
+        # Set default date to today (only for text entry fallback)
+        if not CALENDAR_AVAILABLE:
+            self.date_entry.insert(0, date.today().strftime('%d-%m-%Y'))
+        
+        logger.debug("Add Trade tab initialized")
     
     def create_widgets(self) -> None:
         """Create all UI widgets for Add Trade tab."""
@@ -62,9 +73,25 @@ class AddTradeTab:
         
         # Date
         ttk.Label(main_frame, text="Date:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.date_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
-        self.date_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        
+        if CALENDAR_AVAILABLE:
+            # Use calendar picker with today's date as default
+            self.date_entry = DateEntry(
+                main_frame,
+                width=18,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='dd-mm-yyyy',
+                font=('Consolas', 10)
+            )
+            self.date_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        else:
+            # Fallback to text entry
+            self.date_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
+            self.date_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+            ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        
         row += 1
         
         # Stock Symbol
@@ -223,7 +250,14 @@ class AddTradeTab:
         """
         
         # Check date format
-        date_str = self.date_entry.get().strip()
+        if CALENDAR_AVAILABLE:
+            try:
+                date_str = self.date_entry.get_date().strftime('%d-%m-%Y')
+            except:
+                date_str = self.date_entry.get().strip()
+        else:
+            date_str = self.date_entry.get().strip()
+        
         if not date_str:
             logger.warning("Validation failed: Date is empty")
             return False, "Date is required"
@@ -286,7 +320,14 @@ class AddTradeTab:
         
         try:
             # Get and normalize values
-            date_str = self.date_entry.get().strip()
+            if CALENDAR_AVAILABLE:
+                try:
+                    date_str = self.date_entry.get_date().strftime('%d-%m-%Y')
+                except:
+                    date_str = self.date_entry.get().strip()
+            else:
+                date_str = self.date_entry.get().strip()
+            
             day, month, year = date_str.split('-')
             trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"  # Convert to YYYY-MM-DD
             
