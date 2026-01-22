@@ -730,7 +730,7 @@ class ViewRecordsTab:
     
     def show_import_format(self) -> None:
         """Show CSV import format help."""
-        format_msg = """CSV IMPORT FORMAT
+        format_msg = f"""CSV IMPORT FORMAT
 
 Required Columns:
 • Date (DD-MM-YYYY or YYYY-MM-DD)
@@ -752,7 +752,7 @@ Date,Stock,Type,Qty,Price,Brokerage,Notes
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample file available at:
-{config.SAMPLE_CSV_PATH}
+{str(config.SAMPLE_CSV_PATH)}
 
 Tips:
 ✓ First row must be header
@@ -887,7 +887,7 @@ Tips:
             # Get timestamp for filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"trades_export_{timestamp}.csv"
-            filepath = Path("data") / "exports" / filename
+            filepath = config.EXPORTS_DIR / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
             
             # Get all displayed rows
@@ -937,7 +937,7 @@ Tips:
             # Get timestamp for filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"trades_export_{timestamp}.xlsx"
-            filepath = Path("data") / "exports" / filename
+            filepath = config.EXPORTS_DIR / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
             
             # Get all displayed rows
