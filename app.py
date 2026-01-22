@@ -1,35 +1,11 @@
 """
 Trader Ledger Application
 Entry point for the UI
-
-Phase 1: Add Trade tab only
-Phase 2: View Records (coming soon)
-Phase 3: Reports (coming soon)
 """
 
 import tkinter as tk
 import sys
-from pathlib import Path
-
-# Ensure data directory exists in user's AppData for installed .exe
-if getattr(sys, 'frozen', False):
-    # Running as compiled .exe
-    import os
-    APPDATA = Path(os.environ.get('APPDATA', '.'))
-    APP_DIR = APPDATA / "TraderLedger"
-    APP_DIR.mkdir(exist_ok=True)
-    (APP_DIR / "data").mkdir(exist_ok=True)
-    (APP_DIR / "logs").mkdir(exist_ok=True)
-    (APP_DIR / "data" / "exports").mkdir(exist_ok=True)
-    (APP_DIR / "data" / "backups").mkdir(exist_ok=True)
-    
-    # Change working directory to AppData location
-    os.chdir(APP_DIR)
-    
-    # Create sample CSV if it doesn't exist
-    sample_csv = APP_DIR / "data" / "sample_import.csv"
-    if not sample_csv.exists():
-        sample_csv.write_text("Date,Stock,Type,Qty,Price,Brokerage,Notes\n", encoding='utf-8')
+import config  # Import config first to set up directories
 
 from ui.main_window import TraderLedgerApp
 from core.logger import setup_logger
@@ -38,11 +14,22 @@ from core.db_init import init_database
 # Initialize logger
 logger = setup_logger()
 
+# Create sample CSV if it doesn't exist (for both dev and production)
+if not config.SAMPLE_CSV_PATH.exists():
+    config.SAMPLE_CSV_PATH.write_text(
+        "Date,Stock,Type,Qty,Price,Brokerage,Notes\n"
+        "20-01-2026,RELIANCE,BUY,10,250.50,10.00,First trade\n", 
+        encoding='utf-8'
+    )
+    logger.info(f"Created sample CSV at: {config.SAMPLE_CSV_PATH}")
+
 
 def main():
     """Launch the Trader Ledger application."""
     logger.info("="*60)
     logger.info("Starting Trader Ledger Application")
+    logger.info(f"Data directory: {config.DATA_DIR}")
+    logger.info(f"Database path: {config.DB_PATH}")
     logger.info("="*60)
     
     # Initialize database schema if needed

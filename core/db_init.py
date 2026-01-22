@@ -6,11 +6,15 @@ Automatically creates database schema on first run
 import sqlite3
 from pathlib import Path
 from core.logger import setup_logger
+import config
 
 logger = setup_logger()
 
 
-def init_database(db_path: str = 'data/trades.db') -> bool:
+def init_database(db_path: str = None) -> bool:
+    """Initialize database. If db_path is None, uses config.DB_PATH."""
+    if db_path is None:
+        db_path = str(config.DB_PATH)
     """
     Initialize database with required schema.
     Creates trade_events table if it doesn't exist.

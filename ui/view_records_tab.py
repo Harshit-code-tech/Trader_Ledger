@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional
 from core.logger import get_logger
 from core.utils import format_money
+import config
 
 logger = get_logger('ui.view_records_tab')
 
@@ -316,7 +317,7 @@ class ViewRecordsTab:
     def load_equity_list(self) -> None:
         """Load unique equity list for filter dropdown."""
         try:
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("SELECT DISTINCT equity FROM trade_events ORDER BY equity")
             equities = [row[0] for row in c.fetchall()]
@@ -390,7 +391,7 @@ class ViewRecordsTab:
             query += " ORDER BY id DESC"
             
             # Execute query
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute(query, params)
             trades = c.fetchall()
@@ -522,7 +523,7 @@ class ViewRecordsTab:
         
         # Fetch full trade details
         try:
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
                 SELECT trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active
@@ -579,7 +580,7 @@ class ViewRecordsTab:
         
         try:
             logger.info(f"Soft deleting trade ID: {trade_id}")
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("UPDATE trade_events SET is_active = 0 WHERE id = ?", (trade_id,))
             conn.commit()
@@ -711,7 +712,7 @@ class ViewRecordsTab:
                 db_value = new_value
             
             # Update database
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute(f"UPDATE trade_events SET {db_field} = ? WHERE id = ?", (db_value, trade_id))
             conn.commit()
@@ -751,7 +752,7 @@ Date,Stock,Type,Qty,Price,Brokerage,Notes
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample file available at:
-data/sample_import.csv
+{config.SAMPLE_CSV_PATH}
 
 Tips:
 ✓ First row must be header
@@ -800,7 +801,7 @@ Tips:
                     logger.warning(f"Invalid CSV format: missing required columns")
                     return
                 
-                conn = sqlite3.connect('data/trades.db')
+                conn = sqlite3.connect(str(config.DB_PATH))
                 cursor = conn.cursor()
                 
                 for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
@@ -1020,7 +1021,7 @@ Tips:
                 return
             
             # Copy database file
-            shutil.copy2("data/trades.db", filepath)
+            shutil.copy2(str(config.DB_PATH), filepath)
             
             logger.info(f"✅ Database backed up to: {filepath}")
             self.update_status(f"✅ Backup saved: {Path(filepath).name}")
@@ -1062,12 +1063,12 @@ Tips:
                 return
             
             # Create a safety backup of current database
-            safety_backup = f"data/trades_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            shutil.copy2("data/trades.db", safety_backup)
+            safety_backup = config.DB_BACKUP_DIR / f"trades_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            shutil.copy2(str(config.DB_PATH), str(safety_backup))
             logger.info(f"Created safety backup: {safety_backup}")
             
             # Restore from backup
-            shutil.copy2(filepath, "data/trades.db")
+            shutil.copy2(filepath, str(config.DB_PATH))
             
             logger.info(f"✅ Database restored from: {filepath}")
             self.update_status("✅ Database restored")
@@ -1206,7 +1207,7 @@ class EditTradeDialog:
             logger.info(f"Updating trade ID {self.trade_id}: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
             
             # Update database
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
                 UPDATE trade_events

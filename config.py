@@ -4,6 +4,8 @@ Configuration file for Trader Ledger application.
 Centralized settings for database, UI, and application behavior.
 """
 
+import os
+import sys
 from pathlib import Path
 
 # Application info
@@ -11,10 +13,31 @@ APP_NAME = "Trader Ledger - Baba's Trading App"
 APP_VERSION = "1.0.1"
 APP_AUTHOR = "Built for Baba"
 
+def get_data_directory():
+    """
+    Get the appropriate data directory based on environment.
+    
+    - For packaged app (frozen): Uses AppData/Roaming/TraderLedger
+    - For development: Uses local data/ folder
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            data_dir = Path(appdata) / "TraderLedger"
+        else:
+            # Fallback to home directory if APPDATA not available
+            data_dir = Path.home() / ".traderleger"
+    else:
+        # Running in development
+        data_dir = Path(__file__).parent / "data"
+    
+    return data_dir
+
 # Paths
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
-LOGS_DIR = BASE_DIR / "logs"
+BASE_DIR = Path(__file__).parent if not getattr(sys, 'frozen', False) else Path(sys.executable).parent
+DATA_DIR = get_data_directory()
+LOGS_DIR = DATA_DIR / "logs"
 EXPORTS_DIR = DATA_DIR / "exports"
 
 # Database
@@ -22,10 +45,10 @@ DB_PATH = DATA_DIR / "trades.db"
 DB_BACKUP_DIR = DATA_DIR / "backups"
 
 # Ensure directories exist
-DATA_DIR.mkdir(exist_ok=True)
-LOGS_DIR.mkdir(exist_ok=True)
-EXPORTS_DIR.mkdir(exist_ok=True)
-DB_BACKUP_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+DB_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # UI Settings
 WINDOW_WIDTH = 1400

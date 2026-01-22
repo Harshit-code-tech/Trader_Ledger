@@ -21,6 +21,7 @@ from typing import Callable
 from datetime import datetime
 from pathlib import Path
 from core.logger import get_logger
+import config
 
 # Import FIFO and P/L calculation modules
 from core.fifo_matcher import fetch_active_trades, match_fifo
@@ -558,11 +559,11 @@ class ReportsTab:
             import webbrowser
             
             # Ensure export directory exists
-            Path("data/exports").mkdir(parents=True, exist_ok=True)
+            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
             
             # Generate timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = f"data/exports/report_{timestamp}.html"
+            filepath = config.EXPORTS_DIR / f"report_{timestamp}.html"
             
             # Get current period selection
             period_type = self.period_var.get()

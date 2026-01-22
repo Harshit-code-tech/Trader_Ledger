@@ -16,6 +16,7 @@ Log Levels:
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+import config
 
 
 def setup_logger(name: str = 'trader_ledger') -> logging.Logger:
@@ -29,9 +30,8 @@ def setup_logger(name: str = 'trader_ledger') -> logging.Logger:
         Configured logger instance
     """
     
-    # Create logs directory if it doesn't exist
-    log_dir = Path('logs')
-    log_dir.mkdir(exist_ok=True)
+    # Use config for log directory
+    log_dir = config.LOGS_DIR
     
     # Create logger
     logger = logging.getLogger(name)

@@ -23,6 +23,7 @@ import sqlite3
 from typing import Callable
 from core.logger import get_logger
 from core.utils import format_money
+import config
 
 logger = get_logger('ui.add_trade_tab')
 
@@ -231,7 +232,7 @@ class AddTradeTab:
     def load_equity_dropdown(self) -> None:
         """Load unique equity symbols from database for autocomplete."""
         try:
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
             equities = [row[0] for row in c.fetchall()]
@@ -351,8 +352,8 @@ class AddTradeTab:
             logger.debug(f"Trade details - Date: {trade_date}, Equity: {equity}, Type: {trade_type}, Qty: {quantity}, Price: {price_paise} paise, Brokerage: {brokerage_paise} paise")
             
             # Insert into database
-            logger.debug("Connecting to database: data/trades.db")
-            conn = sqlite3.connect('data/trades.db')
+            logger.debug(f"Connecting to database: {config.DB_PATH}")
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
                 INSERT INTO trade_events (trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active)
@@ -387,7 +388,7 @@ class AddTradeTab:
             self.recent_tree.delete(item)
         
         try:
-            conn = sqlite3.connect('data/trades.db')
+            conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
                 SELECT trade_date, equity, trade_type, quantity, price, brokerage

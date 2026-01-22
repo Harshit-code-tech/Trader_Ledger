@@ -1,7 +1,8 @@
 import sqlite3
 from typing import TypedDict
+import config
 
-DB_PATH = 'data/trades.db'
+DB_PATH = str(config.DB_PATH)
 
 
 class FifoMatchError(Exception):

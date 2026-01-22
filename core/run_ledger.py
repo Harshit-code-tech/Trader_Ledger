@@ -3,8 +3,9 @@ from core.pnl_calculator import calculate_match_pnl, TradeDict, PnlResult, PnlCa
 from core.pnl_aggregator import aggregate_pnl_by_date, aggregate_pnl_by_month
 import sqlite3
 import sys
+import config
 
-DB_PATH = 'data/trades.db'
+DB_PATH = str(config.DB_PATH)
 
 def get_equities(trades_by_id: dict[int, TradeDict]) -> list[str]:
     """
