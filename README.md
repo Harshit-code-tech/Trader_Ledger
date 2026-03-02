@@ -4,6 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.1-brightgreen.svg)](docs/V1.1_FEATURES.md)
 
 ## 🎯 Overview
 
@@ -14,17 +15,32 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Accurate FIFO Calculations** - Automatically matches sell orders with buy orders using First-In-First-Out logic
 - ✅ **Trade Management** - Record, edit, and delete BUY/SELL transactions with validation
 - ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
+- 🆕 **Equity-wise Filtering (v1.1)** - Analyze P/L for individual stocks
+- 🆕 **Date Range Filtering (v1.1)** - View performance for specific time periods
+- 🆕 **Open Positions Tracking (v1.1)** - See stocks you're still holding with average prices
 - ✅ **CSV Import/Export** - Bulk import trades and export reports in CSV or Excel format
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
 - ✅ **Offline First** - Works completely offline with all data stored locally
 - ✅ **Clean UI** - User-friendly Tkinter interface with calendar date picker and data validation
+
+## 🆕 What's New in v1.1
+
+Version 1.1 adds powerful filtering and analysis features:
+
+1. **Filter by Stock** - Select a specific equity to see its P/L
+2. **Filter by Date Range** - Analyze performance for any time period
+3. **Open Positions** - Track what you're still holding with average buy prices
+4. **Equity-wise Summary** - See closed P/L, open P/L, and total per stock
+
+👉 **[Read v1.1 Quick Guide](docs/V1.1_QUICK_GUIDE.md)** for usage examples  
+👉 **[Full v1.1 Documentation](docs/V1.1_FEATURES.md)** for technical details
 
 ## 📸 Screenshots
 
 The application includes three main tabs:
 - **Add Trade** - Record new trades with validation
 - **View Records** - Browse, filter, edit, import/export trades
-- **Reports** - Analyze profit/loss across different timeframes
+- **Reports** - Analyze profit/loss across different timeframes with v1.1 filters
 
 ## 🚀 Quick Start
 
