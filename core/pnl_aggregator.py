@@ -22,6 +22,10 @@ class TradeDict(TypedDict):
     trade_date: str
     equity: str
     trade_type: str
+    type1: str | None
+    type2: str | None
+    strike: float | None
+    expiry: str | None
     quantity: int
     price: int
     brokerage: int

@@ -26,11 +26,15 @@ def build_trades_by_id(trades: list[TradeTuple]) -> dict[int, TradeDict]:
         trade_date=t[1],
         equity=t[2],
         trade_type=t[3],
-        quantity=t[4],
-        price=t[5],
-        brokerage=t[6],
-        notes=t[7],
-        is_active=t[8]
+        type1=t[4] or "delivery",
+        type2=t[5],
+        strike=t[6],
+        expiry=t[7],
+        quantity=t[8],
+        price=t[9],
+        brokerage=t[10],
+        notes=t[11],
+        is_active=t[12]
     ) for t in trades}
 
 def main() -> None:

@@ -1,6 +1,7 @@
 import sqlite3
 from typing import TypedDict
 import config
+from core.trade_validation import normalize_trade_classification
 
 DB_PATH = str(config.DB_PATH)
 
@@ -22,15 +23,18 @@ class MatchRecord(TypedDict):
     equity: str
 
 
-# Trade tuple from DB: (id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active)
-TradeTuple = tuple[int, str, str, str, int, int, int, str, int]
+# Trade tuple from DB:
+# (id, trade_date, equity, trade_type, type1, type2, strike, expiry, quantity, price, brokerage, notes, is_active)
+TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None, int, int, int, str, int]
+ContractKey = tuple[str, str, str | None, float | None, str | None]
 
 
 def fetch_active_trades() -> list[TradeTuple]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active
+        SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+               quantity, price, brokerage, notes, is_active
         FROM trade_events
         WHERE is_active = 1
         ORDER BY trade_date, id
@@ -42,7 +46,8 @@ def fetch_active_trades() -> list[TradeTuple]:
     normalized_trades: list[TradeTuple] = []
     
     for trade in trades:
-        trade_id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active = trade
+        (trade_id, trade_date, equity, trade_type, type1_raw, type2_raw, strike_raw, expiry_raw,
+         quantity, price, brokerage, notes, is_active) = trade
         
         # Normalize equity (strip whitespace and uppercase)
         equity = equity.strip().upper()
@@ -114,24 +119,56 @@ def fetch_active_trades() -> list[TradeTuple]:
                 f"{'='*60}"
             )
         
+        type1_input = type1_raw or "delivery"
+        type2_input = type2_raw or ""
+        strike_input = "" if strike_raw is None else str(strike_raw)
+        expiry_input = expiry_raw or ""
+
+        try:
+            type1, type2, strike, expiry = normalize_trade_classification(
+                type1_input,
+                type2_input,
+                strike_input,
+                expiry_input,
+                require_type1=True
+            )
+        except ValueError as exc:
+            raise FifoMatchError(
+                f"\n{'='*60}\n"
+                f"INVALID CONTRACT CLASSIFICATION\n"
+                f"{'='*60}\n"
+                f"Trade ID: {trade_id}\n"
+                f"Equity: {equity}\n"
+                f"Type1: {type1_input}\n"
+                f"Type2: {type2_input or '(empty)'}\n"
+                f"Strike: {strike_input or '(empty)'}\n"
+                f"Expiry: {expiry_input or '(empty)'}\n"
+                f"Error: {str(exc)}\n"
+                f"{'='*60}"
+            ) from exc
+
         # Add normalized trade to list
-        normalized_trades.append((trade_id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active))
+        normalized_trades.append(
+            (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+             quantity, price, brokerage, notes, is_active)
+        )
     
     return normalized_trades
 
 
 def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[MatchRecord] | None:
     """
-    Matches SELLs to BUYs per equity. FIFO is applied independently for each stock.
+    Matches SELLs to BUYs per contract identity. FIFO is applied independently per contract.
     If collect_matches is True, returns a list of match records (sell_id, buy_id, matched_quantity, equity).
-    Raises FifoMatchError if oversell is detected for any equity.
+    Raises FifoMatchError if oversell is detected for any contract.
     """
-    buy_queues: dict[str, list[BuyQueueItem]] = {}  # Per-equity buy queues
-    equity_holdings: dict[str, int] = {}  # Track total holdings per equity
+    buy_queues: dict[ContractKey, list[BuyQueueItem]] = {}  # Per-contract buy queues
+    contract_holdings: dict[ContractKey, int] = {}  # Track total holdings per contract
     matches: list[MatchRecord] = []
     
     for trade in trades:
-        trade_id, trade_date, equity, trade_type, quantity, _price, _brokerage, _notes, _is_active = trade
+        (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+         quantity, _price, _brokerage, _notes, _is_active) = trade
         
         # Validate equity field
         if not equity or equity.strip() == '':
@@ -140,21 +177,28 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                 f"Every trade must specify a stock symbol (e.g., 'TCS', 'RELIANCE')."
             )
         
-        # Initialize buy queue and holdings for this equity if not exists
-        if equity not in buy_queues:
-            buy_queues[equity] = []
-            equity_holdings[equity] = 0
+        contract_key: ContractKey = (equity, type1, type2, strike, expiry)
+        contract_label = f"{equity} | {type1}"
+        if type1 == 'options':
+            contract_label = f"{equity} | options | {type2} | {strike} | {expiry}"
+        elif type1 == 'futures':
+            contract_label = f"{equity} | futures | {expiry}"
+
+        # Initialize buy queue and holdings for this contract if not exists
+        if contract_key not in buy_queues:
+            buy_queues[contract_key] = []
+            contract_holdings[contract_key] = 0
         
         if trade_type == 'BUY':
-            buy_queues[equity].append(BuyQueueItem(
+            buy_queues[contract_key].append(BuyQueueItem(
                 id=trade_id,
                 remaining_quantity=quantity
             ))
-            equity_holdings[equity] += quantity
+            contract_holdings[contract_key] += quantity
         elif trade_type == 'SELL':
             sell_qty: int = quantity
-            buy_queue = buy_queues[equity]
-            available_qty = equity_holdings[equity]
+            buy_queue = buy_queues[contract_key]
+            available_qty = contract_holdings[contract_key]
             
             while sell_qty > 0:
                 if not buy_queue:
@@ -163,7 +207,7 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                     
                     raise FifoMatchError(
                         f"\n{'='*60}\n"
-                        f"OVERSELL DETECTED for {equity}\n"
+                        f"OVERSELL DETECTED for {contract_label}\n"
                         f"{'='*60}\n"
                         f"Trade ID: {trade_id}\n"
                         f"Date: {trade_date}\n"
@@ -172,7 +216,7 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                         f"Oversell amount: {oversell_amount} shares\n"
                         f"\n"
                         f"💡 Suggestions:\n"
-                        f"  1. Check if you have BUY trades for {equity} before this date\n"
+                        f"  1. Check if you have BUY trades for this contract before this date\n"
                         f"  2. Verify the SELL quantity is correct (should be ≤ {available_qty})\n"
                         f"  3. Ensure trades are in chronological order\n"
                         f"  4. Check if equity symbol is spelled correctly\n"
@@ -192,7 +236,7 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                 
                 oldest_buy['remaining_quantity'] -= match_qty
                 sell_qty -= match_qty
-                equity_holdings[equity] -= match_qty
+                contract_holdings[contract_key] -= match_qty
                 
                 if oldest_buy['remaining_quantity'] == 0:
                     buy_queue.pop(0)

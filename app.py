@@ -17,8 +17,8 @@ logger = setup_logger()
 # Create sample CSV if it doesn't exist (for both dev and production)
 if not config.SAMPLE_CSV_PATH.exists():
     config.SAMPLE_CSV_PATH.write_text(
-        "Date,Stock,Type,Qty,Price,Brokerage,Notes\n"
-        "20-01-2026,RELIANCE,BUY,10,250.50,10.00,First trade\n", 
+        "Date,Stock,Type,Qty,Price,Brokerage,Notes,Type1,Type2,Strike,Expiry\n"
+        "20-01-2026,RELIANCE,BUY,10,250.50,10.00,First trade,delivery,,,\n",
         encoding='utf-8'
     )
     logger.info(f"Created sample CSV at: {config.SAMPLE_CSV_PATH}")

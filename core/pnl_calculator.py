@@ -10,6 +10,10 @@ class TradeDict(TypedDict):
     trade_date: str
     equity: str
     trade_type: str
+    type1: str | None
+    type2: str | None
+    strike: float | None
+    expiry: str | None
     quantity: int
     price: int
     brokerage: int
@@ -176,8 +180,16 @@ if __name__ == '__main__':
     # Example trades and matches
     # All values in paise
     trades_by_id: dict[int, TradeDict] = {
-        1: TradeDict(id=1, trade_date='2026-01-15', equity='TCS', trade_type='BUY', quantity=10, price=1000, brokerage=10, notes='', is_active=1),
-        2: TradeDict(id=2, trade_date='2026-01-15', equity='TCS', trade_type='SELL', quantity=6, price=1200, brokerage=6, notes='', is_active=1),
+        1: TradeDict(
+            id=1, trade_date='2026-01-15', equity='TCS', trade_type='BUY',
+            type1='delivery', type2=None, strike=None, expiry=None,
+            quantity=10, price=1000, brokerage=10, notes='', is_active=1
+        ),
+        2: TradeDict(
+            id=2, trade_date='2026-01-15', equity='TCS', trade_type='SELL',
+            type1='delivery', type2=None, strike=None, expiry=None,
+            quantity=6, price=1200, brokerage=6, notes='', is_active=1
+        ),
     }
     # SELL 2 matches BUY 1 in two lots: 4 and 2
     matches: list[MatchRecord] = [

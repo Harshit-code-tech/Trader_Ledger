@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional
 from core.logger import get_logger
 from core.utils import format_money
+from core.trade_validation import normalize_trade_classification
 import config
 
 logger = get_logger('ui.view_records_tab')
@@ -182,7 +183,10 @@ class ViewRecordsTab:
         hsb = ttk.Scrollbar(table_frame, orient="horizontal")
         
         # Treeview
-        columns = ('ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status')
+        columns = (
+            'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+            'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+        )
         self.records_tree = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -199,6 +203,10 @@ class ViewRecordsTab:
         self.records_tree.heading('Date', text='Date')
         self.records_tree.heading('Stock', text='Stock')
         self.records_tree.heading('Type', text='Type')
+        self.records_tree.heading('Type1', text='Type1')
+        self.records_tree.heading('Type2', text='Type2')
+        self.records_tree.heading('Strike', text='Strike')
+        self.records_tree.heading('Expiry', text='Expiry')
         self.records_tree.heading('Qty', text='Qty')
         self.records_tree.heading('Price', text='Price (₹)')
         self.records_tree.heading('Brokerage', text='Brokerage (₹)')
@@ -209,6 +217,10 @@ class ViewRecordsTab:
         self.records_tree.column('Date', width=100, anchor='center')
         self.records_tree.column('Stock', width=80, anchor='center')
         self.records_tree.column('Type', width=60, anchor='center')
+        self.records_tree.column('Type1', width=90, anchor='center')
+        self.records_tree.column('Type2', width=60, anchor='center')
+        self.records_tree.column('Strike', width=80, anchor='e')
+        self.records_tree.column('Expiry', width=100, anchor='center')
         self.records_tree.column('Qty', width=60, anchor='center')
         self.records_tree.column('Price', width=100, anchor='e')
         self.records_tree.column('Brokerage', width=100, anchor='e')
@@ -342,7 +354,8 @@ class ViewRecordsTab:
             
             # Build query based on filters
             query = """
-                SELECT id, trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active
+                SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+                       quantity, price, brokerage, notes, is_active
                 FROM trade_events
                 WHERE 1=1
             """
@@ -401,7 +414,8 @@ class ViewRecordsTab:
             
             # Populate table
             for trade in trades:
-                trade_id, trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, is_active = trade
+                (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+                 quantity, price_paise, brokerage_paise, notes, is_active) = trade
                 
                 # Format date DD-MM-YYYY
                 year, month, day = trade_date.split('-')
@@ -410,12 +424,25 @@ class ViewRecordsTab:
                 # Status
                 status = "Active" if is_active == 1 else "Deleted"
                 
+                # Normalize display values
+                type1_display = (type1 or "delivery").upper()
+                type2_display = type2 if type2 else ""
+                strike_display = f"{strike:.2f}" if strike is not None else ""
+                expiry_display = ""
+                if expiry:
+                    year_e, month_e, day_e = expiry.split('-')
+                    expiry_display = f"{day_e}-{month_e}-{year_e}"
+
                 # Insert into tree
                 item = self.records_tree.insert('', 'end', values=(
                     trade_id,
                     display_date,
                     equity,
                     trade_type,
+                    type1_display,
+                    type2_display,
+                    strike_display,
+                    expiry_display,
                     quantity,
                     format_money(price_paise),
                     format_money(brokerage_paise),
@@ -508,7 +535,7 @@ class ViewRecordsTab:
         
         item = self.records_tree.item(selection[0])
         trade_id = item['values'][0]
-        status = item['values'][8]  # Status column
+        status = item['values'][12]  # Status column
         
         # Prevent editing deleted trades
         if status == "Deleted":
@@ -526,7 +553,8 @@ class ViewRecordsTab:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
-                SELECT trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active
+                SELECT trade_date, equity, trade_type, type1, type2, strike, expiry,
+                       quantity, price, brokerage, notes, is_active
                 FROM trade_events
                 WHERE id = ?
             """, (trade_id,))
@@ -566,7 +594,7 @@ class ViewRecordsTab:
         
         item = self.records_tree.item(selection[0])
         trade_id = item['values'][0]
-        trade_info = f"{item['values'][3]} {item['values'][4]} {item['values'][2]} on {item['values'][1]}"
+        trade_info = f"{item['values'][3]} {item['values'][8]} {item['values'][2]} on {item['values'][1]}"
         
         # Confirm deletion
         result = messagebox.askyesno(
@@ -613,17 +641,20 @@ class ViewRecordsTab:
         
         # Get column name
         col_index = int(column[1:]) - 1  # #1 -> 0, #2 -> 1, etc.
-        columns = ('ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status')
+        columns = (
+            'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+            'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+        )
         col_name = columns[col_index]
         
         # Don't allow editing ID or Status columns
-        if col_name in ('ID', 'Status'):
+        if col_name in ('ID', 'Status', 'Type1', 'Type2', 'Strike', 'Expiry'):
             logger.debug(f"Inline edit: Column {col_name} is readonly")
             return
         
         # Check if trade is deleted
         values = self.records_tree.item(item, 'values')
-        if values[8] == "Deleted":  # Status column
+        if values[12] == "Deleted":  # Status column
             messagebox.showwarning("Cannot Edit", "Cannot edit a deleted trade.")
             return
         
@@ -742,13 +773,17 @@ Required Columns:
 Optional Columns:
 • Brokerage (in rupees, default 0)
 • Notes (any text)
+• Type1 (intraday/delivery/mtf/futures/options)
+• Type2 (CE/PE, required for options only)
+• Strike (required for options only)
+• Expiry (required for options/futures)
 
 Example CSV:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Date,Stock,Type,Qty,Price,Brokerage,Notes
-20-01-2026,TCS,BUY,10,350.50,10.00,Sample trade
-21-01-2026,RELIANCE,BUY,5,280.00,8.00,Another trade
-22-01-2026,TCS,SELL,10,360.00,10.00,Profit booking
+Date,Stock,Type,Qty,Price,Brokerage,Notes,Type1,Type2,Strike,Expiry
+20-01-2026,TCS,BUY,10,350.50,10.00,Sample trade,delivery,,,
+21-01-2026,RELIANCE,BUY,5,280.00,8.00,Another trade,intraday,,,
+22-01-2026,NIFTY,BUY,50,12.00,2.00,Options entry,options,CE,22500,25-01-2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample file available at:
@@ -789,7 +824,7 @@ Tips:
             with open(file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 
-                # Expected columns: Date, Stock, Type, Qty, Price, Brokerage (optional), Notes (optional)
+                # Expected columns: Date, Stock, Type, Qty, Price (Type1+ derivatives are optional)
                 required_cols = ['Date', 'Stock', 'Type', 'Qty', 'Price']
                 
                 if not reader.fieldnames or not all(col in reader.fieldnames for col in required_cols):
@@ -844,12 +879,34 @@ Tips:
                             brokerage_paise = int(brokerage_rupees * 100)
                         
                         notes = row.get('Notes', '').strip()
+
+                        type1_raw = (row.get('Type1') or '').strip()
+                        type2_raw = (row.get('Type2') or '').strip()
+                        strike_raw = (row.get('Strike') or '').strip()
+                        expiry_raw = (row.get('Expiry') or '').strip()
+
+                        if not type1_raw:
+                            type1_raw = 'delivery'
+
+                        type1, type2, strike, expiry = normalize_trade_classification(
+                            type1_raw,
+                            type2_raw,
+                            strike_raw,
+                            expiry_raw,
+                            require_type1=True
+                        )
                         
                         # Insert into database
                         cursor.execute("""
-                            INSERT INTO trades (trade_date, equity, trade_type, quantity, price, brokerage, notes)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes))
+                            INSERT INTO trade_events (
+                                trade_date, equity, trade_type, quantity, price, brokerage, notes,
+                                type1, type2, strike, expiry, is_active
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """, (
+                            trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes,
+                            type1, type2, strike, expiry
+                        ))
                         
                         imported_count += 1
                         
@@ -904,7 +961,10 @@ Tips:
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 # Header
-                writer.writerow(['ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status'])
+                writer.writerow([
+                    'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+                    'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+                ])
                 # Data
                 writer.writerows(rows)
             
@@ -956,7 +1016,10 @@ Tips:
             ws.title = "Trades"
             
             # Header row
-            headers = ['ID', 'Date', 'Stock', 'Type', 'Qty', 'Price', 'Brokerage', 'Notes', 'Status']
+            headers = [
+                'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+                'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+            ]
             ws.append(headers)
             
             # Style header
@@ -1098,13 +1161,14 @@ class EditTradeDialog:
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"Edit Trade #{trade_id}")
-        self.dialog.geometry("550x500")
+        self.dialog.geometry("600x650")
         self.dialog.resizable(False, False)  # Prevent accidental resizing
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
         # Unpack trade data
-        trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, _ = trade_data
+        (trade_date, equity, trade_type, type1, type2, strike, expiry,
+         quantity, price_paise, brokerage_paise, notes, _) = trade_data
         
         # Convert for display
         price_rupees = price_paise / 100
@@ -1148,6 +1212,53 @@ class EditTradeDialog:
         ttk.Radiobutton(type_frame, text="BUY", variable=self.trade_type_var, value='BUY').pack(side='left', padx=5)
         ttk.Radiobutton(type_frame, text="SELL", variable=self.trade_type_var, value='SELL').pack(side='left', padx=5)
         row += 1
+
+        # Type1 (classification)
+        ttk.Label(main_frame, text="Type1:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.type1_var = tk.StringVar(value=(type1 or "DELIVERY").upper())
+        self.type1_entry = ttk.Combobox(
+            main_frame,
+            textvariable=self.type1_var,
+            values=['INTRADAY', 'DELIVERY', 'MTF', 'FUTURES', 'OPTIONS'],
+            state='readonly',
+            width=23
+        )
+        self.type1_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.type1_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_derivative_fields())
+        row += 1
+
+        # Type2 (options only)
+        self.type2_label = ttk.Label(main_frame, text="Type2:", font=('Arial', 10))
+        self.type2_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.type2_var = tk.StringVar(value=type2 or "")
+        self.type2_entry = ttk.Combobox(
+            main_frame,
+            textvariable=self.type2_var,
+            values=['CE', 'PE'],
+            state='readonly',
+            width=23
+        )
+        self.type2_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        row += 1
+
+        # Strike (options only)
+        self.strike_label = ttk.Label(main_frame, text="Strike:", font=('Arial', 10))
+        self.strike_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.strike_entry = ttk.Entry(main_frame, width=25)
+        self.strike_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        if strike is not None:
+            self.strike_entry.insert(0, f"{strike:.2f}")
+        row += 1
+
+        # Expiry (options/futures)
+        self.expiry_label = ttk.Label(main_frame, text="Expiry:", font=('Arial', 10))
+        self.expiry_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.expiry_entry = ttk.Entry(main_frame, width=25)
+        self.expiry_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        if expiry:
+            year_e, month_e, day_e = expiry.split('-')
+            self.expiry_entry.insert(0, f"{day_e}-{month_e}-{year_e}")
+        row += 1
         
         # Quantity
         ttk.Label(main_frame, text="Quantity:", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
@@ -1176,6 +1287,8 @@ class EditTradeDialog:
         self.notes_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.notes_entry.insert('1.0', notes)
         row += 1
+
+        self.update_derivative_fields()
         
         # Buttons
         button_frame = ttk.Frame(main_frame)
@@ -1183,6 +1296,48 @@ class EditTradeDialog:
         
         ttk.Button(button_frame, text="Cancel", command=self.dialog.destroy, width=15).pack(side='left', padx=10)
         ttk.Button(button_frame, text="Save Changes", command=self.save_changes, width=15).pack(side='left', padx=10)
+
+    def update_derivative_fields(self) -> None:
+        """Enable/disable derivative fields based on Type1 selection."""
+        type1 = self.type1_var.get().strip().lower()
+        is_options = type1 == 'options'
+        is_futures = type1 == 'futures'
+
+        def show_option_fields() -> None:
+            self.type2_label.grid()
+            self.type2_entry.grid()
+            self.strike_label.grid()
+            self.strike_entry.grid()
+            self.expiry_label.grid()
+            self.expiry_entry.grid()
+
+        def show_futures_fields() -> None:
+            self.type2_label.grid_remove()
+            self.type2_entry.grid_remove()
+            self.strike_label.grid_remove()
+            self.strike_entry.grid_remove()
+            self.expiry_label.grid()
+            self.expiry_entry.grid()
+
+        def hide_all_derivative_fields() -> None:
+            self.type2_label.grid_remove()
+            self.type2_entry.grid_remove()
+            self.strike_label.grid_remove()
+            self.strike_entry.grid_remove()
+            self.expiry_label.grid_remove()
+            self.expiry_entry.grid_remove()
+
+        if is_options:
+            show_option_fields()
+        elif is_futures:
+            self.type2_var.set('')
+            self.strike_entry.delete(0, tk.END)
+            show_futures_fields()
+        else:
+            self.type2_var.set('')
+            self.strike_entry.delete(0, tk.END)
+            self.expiry_entry.delete(0, tk.END)
+            hide_all_derivative_fields()
     
     def save_changes(self) -> None:
         """Save edited trade to database."""
@@ -1203,6 +1358,14 @@ class EditTradeDialog:
             brokerage_paise = int(brokerage_rupees * 100)
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
+
+            type1, type2, strike, expiry = normalize_trade_classification(
+                self.type1_var.get(),
+                self.type2_var.get(),
+                self.strike_entry.get(),
+                self.expiry_entry.get(),
+                require_type1=True
+            )
             
             logger.info(f"Updating trade ID {self.trade_id}: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
             
@@ -1211,10 +1374,13 @@ class EditTradeDialog:
             c = conn.cursor()
             c.execute("""
                 UPDATE trade_events
-                SET trade_date = ?, equity = ?, trade_type = ?, quantity = ?, 
-                    price = ?, brokerage = ?, notes = ?
+                SET trade_date = ?, equity = ?, trade_type = ?, type1 = ?, type2 = ?,
+                    strike = ?, expiry = ?, quantity = ?, price = ?, brokerage = ?, notes = ?
                 WHERE id = ?
-            """, (trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes, self.trade_id))
+            """, (
+                trade_date, equity, trade_type, type1, type2, strike, expiry,
+                quantity, price_paise, brokerage_paise, notes, self.trade_id
+            ))
             conn.commit()
             conn.close()
             

@@ -23,6 +23,7 @@ import sqlite3
 from typing import Callable
 from core.logger import get_logger
 from core.utils import format_money
+from core.trade_validation import normalize_trade_classification
 import config
 
 logger = get_logger('ui.add_trade_tab')
@@ -47,6 +48,7 @@ class AddTradeTab:
         
         # Create UI
         self.create_widgets()
+        self.update_derivative_fields()
         
         # Set default date to today (only for text entry fallback)
         if not CALENDAR_AVAILABLE:
@@ -112,6 +114,72 @@ class AddTradeTab:
         ttk.Radiobutton(type_frame, text="BUY", variable=self.trade_type_var, value='BUY').pack(side='left', padx=5)
         ttk.Radiobutton(type_frame, text="SELL", variable=self.trade_type_var, value='SELL').pack(side='left', padx=5)
         row += 1
+
+        # Type1 (classification)
+        ttk.Label(main_frame, text="Type1:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.type1_var = tk.StringVar(value='DELIVERY')
+        self.type1_entry = ttk.Combobox(
+            main_frame,
+            textvariable=self.type1_var,
+            width=18,
+            state='readonly',
+            values=['INTRADAY', 'DELIVERY', 'MTF', 'FUTURES', 'OPTIONS'],
+            font=('Consolas', 10)
+        )
+        self.type1_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.type1_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_derivative_fields())
+        ttk.Label(main_frame, text="(classification)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        row += 1
+
+        # Type2 (options only)
+        self.type2_label = ttk.Label(main_frame, text="Type2:", font=('Consolas', 10))
+        self.type2_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.type2_var = tk.StringVar(value='')
+        self.type2_entry = ttk.Combobox(
+            main_frame,
+            textvariable=self.type2_var,
+            width=18,
+            state='readonly',
+            values=['CE', 'PE'],
+            font=('Consolas', 10)
+        )
+        self.type2_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.type2_hint = ttk.Label(main_frame, text="(CE/PE for options)", font=('Consolas', 9), foreground='gray')
+        self.type2_hint.grid(row=row, column=2, sticky='w', padx=5)
+        row += 1
+
+        # Strike (options only)
+        self.strike_label = ttk.Label(main_frame, text="Strike:", font=('Consolas', 10))
+        self.strike_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.strike_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
+        self.strike_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.strike_hint = ttk.Label(main_frame, text="(options only)", font=('Consolas', 9), foreground='gray')
+        self.strike_hint.grid(row=row, column=2, sticky='w', padx=5)
+        row += 1
+
+        # Expiry (options/futures)
+        self.expiry_label = ttk.Label(main_frame, text="Expiry:", font=('Consolas', 10))
+        self.expiry_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        if CALENDAR_AVAILABLE:
+            self.expiry_entry = DateEntry(
+                main_frame,
+                width=18,
+                background='darkblue',
+                foreground='white',
+                borderwidth=2,
+                date_pattern='dd-mm-yyyy',
+                font=('Consolas', 10)
+            )
+            self.expiry_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+            self.expiry_entry.delete(0, 'end')
+            self.expiry_hint = ttk.Label(main_frame, text="", font=('Consolas', 9))
+            self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
+        else:
+            self.expiry_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
+            self.expiry_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+            self.expiry_hint = ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray')
+            self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
+        row += 1
         
         # Quantity
         ttk.Label(main_frame, text="Quantity:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
@@ -174,6 +242,71 @@ class AddTradeTab:
         
         # Recent trades table (display-only)
         self.create_recent_trades_table(main_frame, row)
+
+    def update_derivative_fields(self) -> None:
+        """Enable/disable derivative fields based on Type1 selection."""
+        type1 = self.type1_var.get().strip().lower()
+        is_options = type1 == 'options'
+        is_futures = type1 == 'futures'
+
+        def show_option_fields() -> None:
+            self.type2_label.grid()
+            self.type2_entry.grid()
+            self.type2_hint.grid()
+            self.strike_label.grid()
+            self.strike_entry.grid()
+            self.strike_hint.grid()
+            self.expiry_label.grid()
+            self.expiry_entry.grid()
+            self.expiry_hint.grid()
+
+        def show_futures_fields() -> None:
+            self.type2_label.grid_remove()
+            self.type2_entry.grid_remove()
+            self.type2_hint.grid_remove()
+            self.strike_label.grid_remove()
+            self.strike_entry.grid_remove()
+            self.strike_hint.grid_remove()
+            self.expiry_label.grid()
+            self.expiry_entry.grid()
+            self.expiry_hint.grid()
+
+        def hide_all_derivative_fields() -> None:
+            self.type2_label.grid_remove()
+            self.type2_entry.grid_remove()
+            self.type2_hint.grid_remove()
+            self.strike_label.grid_remove()
+            self.strike_entry.grid_remove()
+            self.strike_hint.grid_remove()
+            self.expiry_label.grid_remove()
+            self.expiry_entry.grid_remove()
+            self.expiry_hint.grid_remove()
+
+        if is_options:
+            show_option_fields()
+        elif is_futures:
+            self.type2_var.set('')
+            self.strike_entry.delete(0, tk.END)
+            show_futures_fields()
+        else:
+            self.type2_var.set('')
+            self.strike_entry.delete(0, tk.END)
+            self.expiry_entry.delete(0, tk.END)
+            hide_all_derivative_fields()
+
+    def get_classification_inputs(self) -> tuple[str, str, str, str]:
+        """Collect classification inputs with safe defaults for disabled fields."""
+        type1 = self.type1_var.get()
+        type1_norm = type1.strip().lower()
+        type2 = self.type2_var.get()
+        strike = self.strike_entry.get()
+        expiry = self.expiry_entry.get()
+
+        if type1_norm not in ('options', 'futures'):
+            return type1, '', '', ''
+        if type1_norm == 'futures':
+            return type1, '', '', expiry
+        return type1, type2, strike, expiry
     
     def create_recent_trades_table(self, parent: ttk.Frame, row: int) -> None:
         """Create table showing last 5 trades. Display-only, no logic."""
@@ -306,6 +439,20 @@ class AddTradeTab:
         except ValueError as e:
             logger.warning(f"Validation failed: Brokerage is not a number - {str(e)}")
             return False, "Brokerage must be a number"
+
+        # Validate Type1/Type2/Strike/Expiry
+        try:
+            type1, type2, strike, expiry = self.get_classification_inputs()
+            normalize_trade_classification(
+                type1,
+                type2,
+                strike,
+                expiry,
+                require_type1=True
+            )
+        except ValueError as exc:
+            logger.warning(f"Validation failed: {str(exc)}")
+            return False, str(exc)
         
         logger.debug("Input validation passed")
         return True, ""
@@ -344,6 +491,15 @@ class AddTradeTab:
             brokerage_paise = int(brokerage_rupees * 100)
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
+
+            type1_in, type2_in, strike_in, expiry_in = self.get_classification_inputs()
+            type1, type2, strike, expiry = normalize_trade_classification(
+                type1_in,
+                type2_in,
+                strike_in,
+                expiry_in,
+                require_type1=True
+            )
             
             # Normalize equity (uppercase, strip spaces)
             equity = equity.strip().upper()
@@ -356,9 +512,15 @@ class AddTradeTab:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
-                INSERT INTO trade_events (trade_date, equity, trade_type, quantity, price, brokerage, notes, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-            """, (trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes))
+                INSERT INTO trade_events (
+                    trade_date, equity, trade_type, quantity, price, brokerage, notes,
+                    type1, type2, strike, expiry, is_active
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (
+                trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes,
+                type1, type2, strike, expiry
+            ))
             trade_id = c.lastrowid
             conn.commit()
             conn.close()
@@ -434,6 +596,11 @@ class AddTradeTab:
         self.date_entry.insert(0, date.today().strftime('%d-%m-%Y'))
         self.equity_entry.delete(0, tk.END)
         self.trade_type_var.set('BUY')
+        self.type1_var.set('DELIVERY')
+        self.type2_var.set('')
+        self.strike_entry.delete(0, tk.END)
+        self.expiry_entry.delete(0, tk.END)
+        self.update_derivative_fields()
         self.quantity_entry.delete(0, tk.END)
         self.price_entry.delete(0, tk.END)
         self.brokerage_entry.delete(0, tk.END)

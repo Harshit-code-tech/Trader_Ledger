@@ -11,7 +11,7 @@ import config
 logger = setup_logger()
 
 
-def init_database(db_path: str = None) -> bool:
+def init_database(db_path: str | None = None) -> bool:
     """Initialize database. If db_path is None, uses config.DB_PATH."""
     if db_path is None:
         db_path = str(config.DB_PATH)
@@ -45,9 +45,27 @@ def init_database(db_path: str = None) -> bool:
                 price NUMERIC NOT NULL CHECK (price > 0),
                 brokerage NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage >= 0),
                 notes TEXT,
+                type1 TEXT CHECK (type1 IN ("intraday", "delivery", "mtf", "futures", "options") OR type1 IS NULL),
+                type2 TEXT CHECK (type2 IN ("CE", "PE") OR type2 IS NULL),
+                strike REAL CHECK (strike > 0 OR strike IS NULL),
+                expiry DATE,
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
             )
         ''')
+
+        # Ensure new columns exist for older databases
+        cursor.execute("PRAGMA table_info(trade_events)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        columns_to_add = {
+            "type1": "type1 TEXT CHECK (type1 IN (\"intraday\", \"delivery\", \"mtf\", \"futures\", \"options\") OR type1 IS NULL)",
+            "type2": "type2 TEXT CHECK (type2 IN (\"CE\", \"PE\") OR type2 IS NULL)",
+            "strike": "strike REAL CHECK (strike > 0 OR strike IS NULL)",
+            "expiry": "expiry DATE"
+        }
+        for column_name, column_def in columns_to_add.items():
+            if column_name not in existing_columns:
+                cursor.execute(f"ALTER TABLE trade_events ADD COLUMN {column_def}")
+                logger.info(f"Added column '{column_name}' to trade_events")
         
         conn.commit()
         
@@ -96,3 +114,22 @@ def check_database_exists(db_path: str = 'data/trades.db') -> bool:
         
     except Exception:
         return False
+
+
+def backfill_type1_delivery(db_path: str | None = None) -> int:
+    """
+    Backfill NULL type1 values to 'delivery'.
+
+    Returns:
+        Number of rows updated.
+    """
+    if db_path is None:
+        db_path = str(config.DB_PATH)
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE trade_events SET type1 = 'delivery' WHERE type1 IS NULL")
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+    return updated

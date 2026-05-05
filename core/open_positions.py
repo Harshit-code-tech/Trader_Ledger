@@ -35,6 +35,10 @@ class TradeDict(TypedDict):
     trade_date: str
     equity: str
     trade_type: str
+    type1: str | None
+    type2: str | None
+    strike: float | None
+    expiry: str | None
     quantity: int
     price: int
     brokerage: int
@@ -44,6 +48,10 @@ class TradeDict(TypedDict):
 
 class OpenPosition(TypedDict):
     equity: str
+    type1: str | None
+    type2: str | None
+    strike: float | None
+    expiry: str | None
     status: str  # "OPEN" or "CLOSED"
     remaining_qty: int
     avg_price: float  # In rupees (price/100)
@@ -76,7 +84,7 @@ def calculate_open_positions(
         matched_qty_per_buy[buy_id] += match['matched_quantity']
     
     # Calculate remaining quantities for all BUY trades
-    open_positions_by_equity: defaultdict[str, list[dict]] = defaultdict(list)
+    open_positions_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list[dict]] = defaultdict(list)
     
     for trade_id, trade in trades_by_id.items():
         if trade['trade_type'] != 'BUY':
@@ -88,7 +96,12 @@ def calculate_open_positions(
         
         if remaining_qty > 0:
             equity = trade['equity']
-            open_positions_by_equity[equity].append({
+            type1 = trade.get('type1') or "delivery"
+            type2 = trade.get('type2')
+            strike = trade.get('strike')
+            expiry = trade.get('expiry')
+            contract = (equity, type1, type2, strike, expiry)
+            open_positions_by_contract[contract].append({
                 'trade_id': trade_id,
                 'remaining_qty': remaining_qty,
                 'price': trade['price'],  # In paise
@@ -99,7 +112,8 @@ def calculate_open_positions(
     # Aggregate open positions per equity
     results: list[OpenPosition] = []
     
-    for equity, positions in open_positions_by_equity.items():
+    for contract, positions in open_positions_by_contract.items():
+        equity, type1, type2, strike, expiry = contract
         total_qty = sum(p['remaining_qty'] for p in positions)
         total_cost = sum(p['remaining_qty'] * p['price'] for p in positions)
         total_brokerage = sum(
@@ -121,6 +135,10 @@ def calculate_open_positions(
         
         results.append(OpenPosition(
             equity=equity,
+            type1=type1,
+            type2=type2,
+            strike=strike,
+            expiry=expiry,
             status="OPEN",
             remaining_qty=total_qty,
             avg_price=round(avg_price_rupees, 2),
@@ -129,7 +147,7 @@ def calculate_open_positions(
         ))
     
     # Sort by equity name
-    results.sort(key=lambda x: x['equity'])
+    results.sort(key=lambda x: (x['equity'], x.get('type1') or "", x.get('expiry') or ""))
     
     return results
 

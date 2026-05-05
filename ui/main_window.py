@@ -10,6 +10,7 @@ from tkinter import ttk
 from ui.add_trade_tab import AddTradeTab
 from ui.view_records_tab import ViewRecordsTab
 from ui.reports_tab import ReportsTab
+from ui.trade_view_tab import TradeViewTab
 from core.logger import get_logger
 
 logger = get_logger('ui.main_window')
@@ -67,6 +68,11 @@ class TraderLedgerApp:
         reports_frame = ttk.Frame(self.notebook)
         self.notebook.add(reports_frame, text="  Reports  ")
         self.reports_tab = ReportsTab(reports_frame, self.update_status)
+
+        # Tab 4: Trade View (Grouped trade units)
+        trade_view_frame = ttk.Frame(self.notebook)
+        self.notebook.add(trade_view_frame, text="  Trade View  ")
+        self.trade_view_tab = TradeViewTab(trade_view_frame, self.update_status)
     
     def on_tab_changed(self, event: tk.Event) -> None:  # type: ignore
         """Handle tab selection changes."""
@@ -77,6 +83,9 @@ class TraderLedgerApp:
         if tab_index == 2:  # Reports is the 3rd tab (index 2)
             logger.debug("Reports tab selected - triggering recalculation")
             self.reports_tab.on_tab_selected()
+        if tab_index == 3:  # Trade View
+            logger.debug("Trade View tab selected - refreshing units")
+            self.trade_view_tab.refresh_units()
     
     def update_status(self, message: str) -> None:
         """Update status bar message."""

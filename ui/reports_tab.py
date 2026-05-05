@@ -148,9 +148,12 @@ class ReportsTab:
         self.from_date_var = tk.StringVar(value="")
         self.to_date_var = tk.StringVar(value="")
         self.show_open_positions_var = tk.BooleanVar(value=False)
+        self.type1_filter_var = tk.StringVar(value="All")
+        self.expiry_filter_var = tk.StringVar(value="")
 
         # Open positions / equity
         self.open_positions = []
+        self.filtered_open_positions = []
         self.equity_pnl = {}
         self.analytics = {}
 
@@ -465,10 +468,37 @@ class ReportsTab:
         )
 
         row3 = ttk.Frame(filter_frame)
-        row3.pack(fill='x')
+        row3.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(row3, text="Type1:", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+        self.type1_filter_entry = ttk.Combobox(
+            row3,
+            textvariable=self.type1_filter_var,
+            values=["All", "intraday", "delivery", "mtf", "futures", "options"],
+            state='readonly',
+            width=12
+        )
+        self.type1_filter_entry.pack(side='left', padx=(0, 20))
+        self.type1_filter_entry.set("All")
+
+        ttk.Label(row3, text="Expiry:", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+        self.expiry_filter_entry = DateEntry(
+            row3,
+            textvariable=self.expiry_filter_var,
+            date_pattern='yyyy-mm-dd',
+            width=12
+        )
+        self.expiry_filter_entry.pack(side='left', padx=5)
+        self.expiry_filter_entry.delete(0, 'end')
+        ttk.Label(row3, text="(clear field to disable)", font=('Arial', 8), foreground='gray').pack(
+            side='left', padx=(10, 0)
+        )
+
+        row4 = ttk.Frame(filter_frame)
+        row4.pack(fill='x')
 
         self.open_positions_check = ttk.Checkbutton(
-            row3,
+            row4,
             text="Include Open Positions",
             variable=self.show_open_positions_var,
             command=self.toggle_open_positions_display
@@ -477,14 +507,14 @@ class ReportsTab:
         Tooltip(self.open_positions_check, "Show holdings that are not fully sold")
 
         ttk.Button(
-            row3,
+            row4,
             text="🔍 Apply Filters",
             command=self.apply_filters,
             width=15
         ).pack(side='left', padx=5)
 
         ttk.Button(
-            row3,
+            row4,
             text="🔄 Clear Filters",
             command=self.clear_filters,
             width=15
@@ -630,11 +660,28 @@ class ReportsTab:
                 ]
                 logger.info(f"Equity filter {selected_equities} applied: {len(filtered_pnl_results)} matches")
 
+            type1_filter = self.type1_filter_var.get().strip().lower()
+            if type1_filter and type1_filter != "all":
+                filtered_pnl_results = [
+                    pnl for pnl in filtered_pnl_results
+                    if (trades_by_id[pnl['sell_id']].get('type1') or "delivery") == type1_filter
+                ]
+                logger.info(f"Type1 filter {type1_filter} applied: {len(filtered_pnl_results)} matches")
+
+            expiry_filter = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
+            if expiry_filter:
+                filtered_pnl_results = [
+                    pnl for pnl in filtered_pnl_results
+                    if trades_by_id[pnl['sell_id']].get('expiry') == expiry_filter
+                ]
+                logger.info(f"Expiry filter {expiry_filter} applied: {len(filtered_pnl_results)} matches")
+
             self.open_positions = calculate_open_positions(matches, trades_by_id)
+            self.filtered_open_positions = self._filter_open_positions(self.open_positions)
             equities = ["All"] + get_unique_equities(trades_by_id)
             self._set_equity_listbox_values(equities)
 
-            equity_pnl_totals = aggregate_pnl_by_equity(pnl_results, trades_by_id)
+            equity_pnl_totals = aggregate_pnl_by_equity(filtered_pnl_results, trades_by_id)
             self.equity_pnl = self._convert_to_pnl_breakdown(equity_pnl_totals)
 
             daily_pnl_totals = aggregate_pnl_by_date(filtered_pnl_results, trades_by_id)
@@ -842,6 +889,9 @@ class ReportsTab:
         self.monthly_pnl = {}
         self.yearly_pnl = {}
         self.analytics = {}
+        self.open_positions = []
+        self.filtered_open_positions = []
+        self.equity_pnl = {}
 
         self.profit_label.config(text="₹ +0.00")
         self.loss_label.config(text="₹ -0.00")
@@ -1062,6 +1112,8 @@ class ReportsTab:
                 'equities': equity_label,
                 'from_date': self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip(),
                 'to_date': self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip(),
+                'type1': self.type1_filter_var.get(),
+                'expiry': self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip(),
                 'include_open_positions': self.show_open_positions_var.get()
             },
             'summary': {
@@ -1100,7 +1152,7 @@ class ReportsTab:
         if hasattr(self, 'open_tree') and self.show_open_positions_var.get():
             for item_id in self.open_tree.get_children():
                 values = self.open_tree.item(item_id, 'values')
-                if len(values) >= 5:
+                if len(values) >= 9:
                     data['open_positions'].append(values)
 
         return data
@@ -1121,6 +1173,8 @@ class ReportsTab:
                 writer.writerow(["Equities", data['filters']['equities']])
                 writer.writerow(["From Date", data['filters']['from_date'] or "-"])
                 writer.writerow(["To Date", data['filters']['to_date'] or "-"])
+                writer.writerow(["Type1", data['filters']['type1'] or "All"])
+                writer.writerow(["Expiry", data['filters']['expiry'] or "-"])
                 writer.writerow(["Include Open Positions", str(data['filters']['include_open_positions'])])
                 writer.writerow([])
 
@@ -1153,7 +1207,10 @@ class ReportsTab:
 
                 if data['open_positions']:
                     writer.writerow(["Open Positions"])
-                    writer.writerow(["Equity", "Status", "Qty", "Avg Price", "Unrealized P/L"])
+                    writer.writerow([
+                        "Equity", "Type1", "Type2", "Strike", "Expiry",
+                        "Status", "Qty", "Avg Price", "Unrealized P/L"
+                    ])
                     for row in data['open_positions']:
                         writer.writerow(row)
 
@@ -1194,6 +1251,8 @@ class ReportsTab:
             ws_summary.append(["Equities", data['filters']['equities']])
             ws_summary.append(["From Date", data['filters']['from_date'] or "-"])
             ws_summary.append(["To Date", data['filters']['to_date'] or "-"])
+            ws_summary.append(["Type1", data['filters']['type1'] or "All"])
+            ws_summary.append(["Expiry", data['filters']['expiry'] or "-"])
             ws_summary.append(["Include Open Positions", str(data['filters']['include_open_positions'])])
             ws_summary.append([])
             ws_summary.append(["Summary"])
@@ -1228,7 +1287,10 @@ class ReportsTab:
 
             if data['open_positions']:
                 ws_open = wb.create_sheet(title="Open Positions")
-                ws_open.append(["Equity", "Status", "Qty", "Avg Price", "Unrealized P/L"])
+                ws_open.append([
+                    "Equity", "Type1", "Type2", "Strike", "Expiry",
+                    "Status", "Qty", "Avg Price", "Unrealized P/L"
+                ])
                 for cell in ws_open[1]:
                     cell.font = bold
                 for row in data['open_positions']:
@@ -1252,6 +1314,7 @@ class ReportsTab:
 
         from_date = self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip()
         to_date = self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip()
+        expiry_date = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
 
         if from_date and not self._validate_date_format(from_date):
             messagebox.showerror("Invalid Date", "From Date must be in YYYY-MM-DD format")
@@ -1259,6 +1322,10 @@ class ReportsTab:
 
         if to_date and not self._validate_date_format(to_date):
             messagebox.showerror("Invalid Date", "To Date must be in YYYY-MM-DD format")
+            return
+
+        if expiry_date and not self._validate_date_format(expiry_date):
+            messagebox.showerror("Invalid Date", "Expiry must be in YYYY-MM-DD format")
             return
 
         if from_date and to_date and from_date > to_date:
@@ -1272,10 +1339,14 @@ class ReportsTab:
         logger.info("Clearing all filters")
         self.from_date_var.set("")
         self.to_date_var.set("")
+        self.type1_filter_var.set("All")
+        self.expiry_filter_var.set("")
         if hasattr(self, 'from_date_entry'):
             self.from_date_entry.delete(0, 'end')
         if hasattr(self, 'to_date_entry'):
             self.to_date_entry.delete(0, 'end')
+        if hasattr(self, 'expiry_filter_entry'):
+            self.expiry_filter_entry.delete(0, 'end')
         self.show_open_positions_var.set(False)
 
         self.select_all_equities()
@@ -1323,6 +1394,22 @@ class ReportsTab:
             if equity in current:
                 self.equity_listbox.selection_set(idx)
 
+    def _filter_open_positions(self, positions: list[dict]) -> list[dict]:
+        """Filter open positions by Type1 and Expiry."""
+        filtered = positions
+        type1_filter = self.type1_filter_var.get().strip().lower()
+        if type1_filter and type1_filter != "all":
+            filtered = [
+                pos for pos in filtered
+                if (pos.get('type1') or "delivery") == type1_filter
+            ]
+
+        expiry_filter = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
+        if expiry_filter:
+            filtered = [pos for pos in filtered if pos.get('expiry') == expiry_filter]
+
+        return filtered
+
     def toggle_open_positions_display(self) -> None:
         """Toggle display of open positions table."""
         if self.show_open_positions_var.get():
@@ -1345,7 +1432,10 @@ class ReportsTab:
             scrollbar = ttk.Scrollbar(table_frame)
             scrollbar.pack(side='right', fill='y')
 
-            columns = ('Equity', 'Status', 'Qty', 'Avg Price', 'Unrealized P/L')
+            columns = (
+                'Equity', 'Type1', 'Type2', 'Strike', 'Expiry',
+                'Status', 'Qty', 'Avg Price', 'Unrealized P/L'
+            )
             self.open_tree = ttk.Treeview(
                 table_frame,
                 columns=columns,
@@ -1356,12 +1446,20 @@ class ReportsTab:
             scrollbar.config(command=self.open_tree.yview)
 
             self.open_tree.heading('Equity', text='Equity', anchor='w')
+            self.open_tree.heading('Type1', text='Type1', anchor='center')
+            self.open_tree.heading('Type2', text='Type2', anchor='center')
+            self.open_tree.heading('Strike', text='Strike', anchor='e')
+            self.open_tree.heading('Expiry', text='Expiry', anchor='center')
             self.open_tree.heading('Status', text='Status', anchor='center')
             self.open_tree.heading('Qty', text='Quantity', anchor='e')
             self.open_tree.heading('Avg Price', text='Avg Price (₹)', anchor='e')
             self.open_tree.heading('Unrealized P/L', text='Unrealized P/L (₹)', anchor='e')
 
             self.open_tree.column('Equity', width=120, anchor='w')
+            self.open_tree.column('Type1', width=90, anchor='center')
+            self.open_tree.column('Type2', width=60, anchor='center')
+            self.open_tree.column('Strike', width=80, anchor='e')
+            self.open_tree.column('Expiry', width=100, anchor='center')
             self.open_tree.column('Status', width=80, anchor='center')
             self.open_tree.column('Qty', width=100, anchor='e')
             self.open_tree.column('Avg Price', width=120, anchor='e')
@@ -1388,14 +1486,18 @@ class ReportsTab:
         for item in self.open_tree.get_children():
             self.open_tree.delete(item)
 
-        filtered_positions = self.open_positions
+        filtered_positions = self.filtered_open_positions
         selected_equities = self._get_selected_equities()
         if selected_equities:
-            filtered_positions = [p for p in self.open_positions if p['equity'] in selected_equities]
+            filtered_positions = [p for p in filtered_positions if p['equity'] in selected_equities]
 
         if not filtered_positions:
             self.open_tree.insert('', 'end', values=(
                 "No open positions",
+                "",
+                "",
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -1409,8 +1511,20 @@ class ReportsTab:
 
             unrealized_display = format_money(pos['unrealized_pnl']) if pos['unrealized_pnl'] != 0 else "₹ 0.00 (no market data)"
 
+            type1_display = (pos.get('type1') or 'delivery').upper()
+            type2_display = pos.get('type2') or ""
+            strike_display = f"{pos['strike']:.2f}" if pos.get('strike') is not None else ""
+            expiry_display = ""
+            if pos.get('expiry'):
+                year_e, month_e, day_e = pos['expiry'].split('-')
+                expiry_display = f"{day_e}-{month_e}-{year_e}"
+
             self.open_tree.insert('', 'end', values=(
                 pos['equity'],
+                type1_display,
+                type2_display,
+                strike_display,
+                expiry_display,
                 pos['status'],
                 f"{pos['remaining_qty']:,}",
                 f"₹ {pos['avg_price']:.2f}",
@@ -1425,7 +1539,7 @@ class ReportsTab:
         for item in self.equity_tree.get_children():
             self.equity_tree.delete(item)
 
-        if not self.equity_pnl and not self.open_positions:
+        if not self.equity_pnl and not self.filtered_open_positions:
             self.equity_tree.insert('', 'end', values=(
                 "No data",
                 "",
@@ -1444,7 +1558,7 @@ class ReportsTab:
                 'has_open': False
             }
 
-        for pos in self.open_positions:
+        for pos in self.filtered_open_positions:
             equity = pos['equity']
             if equity not in equity_data:
                 equity_data[equity] = {
@@ -1453,7 +1567,7 @@ class ReportsTab:
                     'has_open': True
                 }
             else:
-                equity_data[equity]['open_pnl'] = pos['unrealized_pnl']
+                equity_data[equity]['open_pnl'] += pos['unrealized_pnl']
                 equity_data[equity]['has_open'] = True
 
         selected_equities = self._get_selected_equities()
