@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Callable
+from datetime import datetime
 
 from core.fifo_matcher import fetch_active_trades, match_fifo
 from core.pnl_calculator import calculate_match_pnl
@@ -21,6 +22,12 @@ class TradeViewTab:
         self.parent = parent
         self.update_status = status_callback
         self.grouping_var = tk.StringVar(value="lifecycle")
+        self.sort_var = tk.StringVar(value="Date")
+        self.show_raw_var = tk.BooleanVar(value=False)
+        self.total_trades_var = tk.StringVar(value="0")
+        self.closed_trades_var = tk.StringVar(value="0")
+        self.open_trades_var = tk.StringVar(value="0")
+        self.total_pnl_var = tk.StringVar(value="₹ 0.00")
         self.create_widgets()
         self.refresh_units()
 
@@ -34,6 +41,21 @@ class TradeViewTab:
             font=('Consolas', 16, 'bold')
         )
         header.pack(pady=(0, 10))
+
+        summary_frame = ttk.Frame(main_frame)
+        summary_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(summary_frame, text="Total Trades:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, textvariable=self.total_trades_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
+
+        ttk.Label(summary_frame, text="Closed:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, textvariable=self.closed_trades_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
+
+        ttk.Label(summary_frame, text="Open:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, textvariable=self.open_trades_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
+
+        ttk.Label(summary_frame, text="Total P/L (realized):", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, textvariable=self.total_pnl_var, font=('Consolas', 10, 'bold')).pack(side='left')
 
         controls = ttk.Frame(main_frame)
         controls.pack(fill='x', pady=(0, 10))
@@ -53,6 +75,24 @@ class TradeViewTab:
             value="sell",
             command=self.refresh_units
         ).pack(side='left', padx=5)
+
+        ttk.Label(controls, text="Sort by:", font=('Arial', 10)).pack(side='left', padx=(20, 5))
+        self.sort_entry = ttk.Combobox(
+            controls,
+            textvariable=self.sort_var,
+            values=["Date", "Profit/Loss", "Holding Days"],
+            state='readonly',
+            width=14
+        )
+        self.sort_entry.pack(side='left', padx=(0, 10))
+        self.sort_entry.bind('<<ComboboxSelected>>', lambda _e: self.refresh_units())
+
+        ttk.Checkbutton(
+            controls,
+            text="Show raw trades",
+            variable=self.show_raw_var,
+            command=self.refresh_units
+        ).pack(side='left', padx=(10, 0))
 
         ttk.Button(
             controls,
@@ -101,8 +141,18 @@ class TradeViewTab:
         self.units_tree.tag_configure('loss', foreground='#e74c3c')
         self.units_tree.tag_configure('detail', foreground='gray')
         self.units_tree.tag_configure('open', foreground='#2c3e50')
+        self.units_tree.tag_configure('status_open', background='#fff9e6')
+        self.units_tree.tag_configure('status_closed', background='#eef7ff')
 
         self.units_tree.pack(fill='both', expand=True)
+
+        self.help_tip = ttk.Label(
+            main_frame,
+            text="Remaining Investment = FIFO remaining cost (incl. brokerage).",
+            font=('Arial', 9),
+            foreground='gray'
+        )
+        self.help_tip.pack(anchor='w', pady=(6, 0))
 
     def refresh_units(self) -> None:
         """Reload trade units and update the table."""
@@ -126,7 +176,14 @@ class TradeViewTab:
 
             trades_by_id = build_trades_by_id(trades)
             pnl_results = calculate_match_pnl(matches, trades_by_id)
-            units = build_trade_units(trades, pnl_results, grouping=self.grouping_var.get())
+            units = build_trade_units(
+                trades,
+                pnl_results,
+                grouping=self.grouping_var.get()
+            )
+
+            units = self._sort_units(units)
+            self._update_summary(units)
 
             for unit in units:
                 pnl_display = format_money(unit['realized_pnl'])
@@ -137,6 +194,7 @@ class TradeViewTab:
                 holding_display = str(unit['holding_days']) if unit['holding_days'] else ""
 
                 row_tag = 'profit' if unit['realized_pnl'] > 0 else 'loss' if unit['realized_pnl'] < 0 else 'open'
+                status_tag = 'status_closed' if unit['status'] == 'Closed' else 'status_open'
 
                 parent_id = self.units_tree.insert('', 'end', values=(
                     unit['trade_label'],
@@ -149,14 +207,14 @@ class TradeViewTab:
                     holding_display,
                     unit['status'],
                     remaining_display
-                ), tags=(row_tag,))
+                ), tags=(row_tag, status_tag))
 
                 detail_text = f"Buy IDs: {', '.join(map(str, unit['buy_trade_ids'])) or '-'}"
                 detail_text += f" | Sell IDs: {', '.join(map(str, unit['sell_trade_ids'])) or '-'}"
 
                 if unit['status'] == 'Open':
-                    invested_display = format_money_abs(unit['invested_amount'])
-                    detail_text += f" | Invested: {invested_display}"
+                    remaining_display = format_money_abs(unit['remaining_investment'])
+                    detail_text += f" | Remaining Investment: {remaining_display}"
 
                 self.units_tree.insert(parent_id, 'end', values=(
                     detail_text,
@@ -171,9 +229,65 @@ class TradeViewTab:
                     ""
                 ), tags=('detail',))
 
+                if self.show_raw_var.get():
+                    self._insert_raw_trades(parent_id, unit, trades)
+
             self.update_status(f"Loaded {len(units)} trade units")
 
         except Exception as exc:
             logger.error(f"Failed to load trade units: {str(exc)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to load trade units:\n{str(exc)}")
             self.update_status("❌ Error loading trade units")
+
+    def _sort_units(self, units: list[dict]) -> list[dict]:
+        mode = self.sort_var.get().strip().lower()
+        if mode == "profit/loss":
+            return sorted(units, key=lambda u: u['realized_pnl'], reverse=True)
+        if mode == "holding days":
+            return sorted(units, key=lambda u: u['holding_days'], reverse=True)
+
+        def sort_date(unit: dict) -> datetime:
+            date_str = unit.get('end_date') or unit.get('start_date')
+            if not date_str:
+                return datetime.min
+            return datetime.strptime(date_str, "%Y-%m-%d")
+
+        return sorted(units, key=sort_date, reverse=True)
+
+    def _update_summary(self, units: list[dict]) -> None:
+        total_trades = len(units)
+        closed_trades = sum(1 for u in units if u['status'] == 'Closed')
+        open_trades = sum(1 for u in units if u['status'] == 'Open')
+        total_pnl = sum(u['realized_pnl'] for u in units)
+
+        self.total_trades_var.set(str(total_trades))
+        self.closed_trades_var.set(str(closed_trades))
+        self.open_trades_var.set(str(open_trades))
+        self.total_pnl_var.set(format_money(total_pnl))
+
+    def _insert_raw_trades(self, parent_id: str, unit: dict, trades: list[tuple]) -> None:
+        trades_by_id = {trade[0]: trade for trade in trades}
+        trade_ids = unit['buy_trade_ids'] + unit['sell_trade_ids']
+        for trade_id in trade_ids:
+            trade = trades_by_id.get(trade_id)
+            if not trade:
+                continue
+            trade_date = datetime.strptime(trade[1], "%Y-%m-%d").strftime("%d %b %Y")
+            trade_type = trade[3]
+            qty = trade[8]
+            price = format_money_abs(trade[9])
+            brokerage = format_money_abs(trade[10])
+            detail = f"{trade_date} | {trade_type} {qty} @ {price} | Brk {brokerage}"
+
+            self.units_tree.insert(parent_id, 'end', values=(
+                detail,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+            ), tags=('detail',))

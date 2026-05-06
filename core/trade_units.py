@@ -19,19 +19,21 @@ class TradeUnit(TypedDict):
     contract_key: tuple[str, str, str | None, float | None, str | None]
     trade_label: str
     contract_display: str
+    start_date: str | None
+    end_date: str | None
     equity: str
     type1: str
     type2: str | None
     strike: float | None
     expiry: str | None
     total_buy_qty: int
-    avg_buy_price: int
+    avg_buy_price: float
     total_sell_qty: int
-    avg_sell_price: int
+    avg_sell_price: float
     total_buy_cost: int
     total_sell_value: int
     realized_pnl: int
-    invested_amount: int
+    remaining_investment: int
     holding_days: int
     status: str
     remaining_qty: int
@@ -53,6 +55,8 @@ class UnitAccumulator:
     sell_value_ex_brokerage: int = 0
     buy_brokerage: int = 0
     sell_brokerage: int = 0
+    matched_buy_cost: int = 0
+    matched_buy_brokerage: int = 0
     realized_pnl: int = 0
     first_buy_date: str | None = None
     last_sell_date: str | None = None
@@ -74,6 +78,13 @@ def _format_date_display(date_str: str | None) -> str:
     if not date_str:
         return ""
     return _parse_date(date_str).strftime("%d %b %Y")
+
+
+def _format_date_short(date_str: str | None, include_year: bool = False) -> str:
+    if not date_str:
+        return ""
+    fmt = "%d %b %Y" if include_year else "%d %b"
+    return _parse_date(date_str).strftime(fmt)
 
 
 def format_contract_display(
@@ -99,19 +110,21 @@ def format_trade_label(
     end_date: str | None,
     unit_index: int
 ) -> str:
-    start_label = _format_date_display(start_date)
-    end_label = _format_date_display(end_date)
-    if start_label and end_label:
-        return f"{equity} Trade ({start_label} → {end_label})"
-    if start_label and not end_label:
-        return f"{equity} Trade ({start_label} → Open)"
+    if start_date and end_date:
+        start_dt = _parse_date(start_date)
+        end_dt = _parse_date(end_date)
+        same_year = start_dt.year == end_dt.year
+        start_label = _format_date_short(start_date, include_year=not same_year)
+        end_label = _format_date_short(end_date, include_year=True)
+        return f"{equity} {start_label} → {end_label}"
+    if start_date and not end_date:
+        start_label = _format_date_short(start_date, include_year=True)
+        return f"{equity} {start_label} → Open"
     return f"Trade #{unit_index}"
 
 
-def _contract_key(trade: TradeTuple, equity_aliases: dict[str, str] | None) -> tuple[str, str, str | None, float | None, str | None]:
+def _contract_key(trade: TradeTuple) -> tuple[str, str, str | None, float | None, str | None]:
     equity = trade[2]
-    if equity_aliases and equity in equity_aliases:
-        equity = equity_aliases[equity]
     type1 = trade[4] or "delivery"
     type2 = trade[5]
     strike = trade[6]
@@ -135,7 +148,6 @@ def build_trade_units(
     trades: Iterable[TradeTuple],
     match_results: Iterable[PnlResult],
     *,
-    equity_aliases: dict[str, str] | None = None,
     grouping: str = "lifecycle"
 ) -> list[TradeUnit]:
     """
@@ -144,25 +156,23 @@ def build_trade_units(
     Args:
         trades: Raw trades from fetch_active_trades()
         match_results: Results from calculate_match_pnl()
-        equity_aliases: Optional mapping to normalize equity names
         grouping: "lifecycle" (flat-to-flat) or "sell" (per SELL trade)
 
     Returns:
-        List of trade units. Monetary values are in paise, avg prices in rupees.
+        List of trade units. Monetary values are in paise (including avg prices).
     """
     trade_list = list(trades)
     pnl_list = list(match_results)
 
     if grouping == "sell":
-        return _build_sell_units(trade_list, pnl_list, equity_aliases)
+        return _build_sell_units(trade_list, pnl_list)
 
-    return _build_lifecycle_units(trade_list, pnl_list, equity_aliases)
+    return _build_lifecycle_units(trade_list, pnl_list)
 
 
 def _build_lifecycle_units(
     trades: list[TradeTuple],
-    match_results: list[PnlResult],
-    equity_aliases: dict[str, str] | None
+    match_results: list[PnlResult]
 ) -> list[TradeUnit]:
     pnl_by_sell: defaultdict[int, list[PnlResult]] = defaultdict(list)
     for pnl in match_results:
@@ -170,7 +180,7 @@ def _build_lifecycle_units(
 
     trades_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list[TradeTuple]] = defaultdict(list)
     for trade in trades:
-        trades_by_contract[_contract_key(trade, equity_aliases)].append(trade)
+        trades_by_contract[_contract_key(trade)].append(trade)
 
     units: list[TradeUnit] = []
     unit_index = 1
@@ -205,6 +215,8 @@ def _build_lifecycle_units(
                 current.last_sell_date = trade_date
                 for pnl in pnl_by_sell.get(trade_id, []):
                     current.realized_pnl += pnl['realized_pnl']
+                    current.matched_buy_cost += pnl['buy_cost']
+                    current.matched_buy_brokerage += pnl['buy_brokerage_alloc']
 
             net_qty = current.total_buy_qty - current.total_sell_qty
             if net_qty == 0 and current.total_sell_qty > 0:
@@ -221,8 +233,7 @@ def _build_lifecycle_units(
 
 def _build_sell_units(
     trades: list[TradeTuple],
-    match_results: list[PnlResult],
-    equity_aliases: dict[str, str] | None
+    match_results: list[PnlResult]
 ) -> list[TradeUnit]:
     trades_by_id = {trade[0]: trade for trade in trades}
     pnl_by_sell: defaultdict[int, list[PnlResult]] = defaultdict(list)
@@ -241,7 +252,7 @@ def _build_sell_units(
 
     for _sell_date, sell_id in sell_keys:
         sell_trade = trades_by_id[sell_id]
-        contract_key = _contract_key(sell_trade, equity_aliases)
+        contract_key = _contract_key(sell_trade)
         equity, type1, type2, strike, expiry = contract_key
 
         sell_matches = pnl_by_sell[sell_id]
@@ -253,8 +264,8 @@ def _build_sell_units(
         sell_brokerage = sum(p['sell_brokerage_alloc'] for p in sell_matches)
         realized_pnl = sum(p['realized_pnl'] for p in sell_matches)
 
-        avg_buy_price = int(buy_cost / total_buy_qty) if total_buy_qty else 0
-        avg_sell_price = int(sell_value / total_sell_qty) if total_sell_qty else 0
+        avg_buy_price = float(buy_cost / total_buy_qty) if total_buy_qty else 0
+        avg_sell_price = float(sell_value / total_sell_qty) if total_sell_qty else 0
 
         buy_trade_ids = sorted({p['buy_id'] for p in sell_matches})
         sell_trade_ids = [sell_id]
@@ -264,10 +275,15 @@ def _build_sell_units(
         if buy_dates:
             holding_days = (_parse_date(sell_trade[1]) - _parse_date(min(buy_dates))).days
 
+        start_date = min(buy_dates) if buy_dates else None
+        end_date = sell_trade[1]
+
         units.append(TradeUnit(
             contract_key=contract_key,
-            trade_label=format_trade_label(equity, min(buy_dates) if buy_dates else None, sell_trade[1], unit_index),
+            trade_label=format_trade_label(equity, start_date, end_date, unit_index),
             contract_display=format_contract_display(equity, type1, type2, strike, expiry),
+            start_date=start_date,
+            end_date=end_date,
             equity=equity,
             type1=type1,
             type2=type2,
@@ -280,7 +296,7 @@ def _build_sell_units(
             total_buy_cost=buy_cost + buy_brokerage,
             total_sell_value=sell_value - sell_brokerage,
             realized_pnl=realized_pnl,
-            invested_amount=0,
+            remaining_investment=0,
             holding_days=holding_days,
             status="Closed",
             remaining_qty=0,
@@ -308,7 +324,7 @@ def _build_sell_units(
         if remaining_qty <= 0:
             continue
 
-        contract_key = _contract_key(trade, equity_aliases)
+        contract_key = _contract_key(trade)
         if contract_key not in open_agg:
             open_agg[contract_key] = _start_unit(contract_key)
 
@@ -330,8 +346,8 @@ def _build_sell_units(
 def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> TradeUnit:
     total_buy_qty = unit.total_buy_qty
     total_sell_qty = unit.total_sell_qty
-    avg_buy_price = int(unit.buy_cost_ex_brokerage / total_buy_qty) if total_buy_qty else 0
-    avg_sell_price = int(unit.sell_value_ex_brokerage / total_sell_qty) if total_sell_qty else 0
+    avg_buy_price = float(unit.buy_cost_ex_brokerage / total_buy_qty) if total_buy_qty else 0
+    avg_sell_price = float(unit.sell_value_ex_brokerage / total_sell_qty) if total_sell_qty else 0
 
     total_buy_cost = unit.buy_cost_ex_brokerage + unit.buy_brokerage
     total_sell_value = unit.sell_value_ex_brokerage - unit.sell_brokerage
@@ -341,14 +357,20 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
         holding_days = (_parse_date(unit.last_sell_date) - _parse_date(unit.first_buy_date)).days
 
     remaining_qty = max(unit.total_buy_qty - unit.total_sell_qty, 0)
-    invested_amount = 0
-    if remaining_qty > 0 and total_buy_qty > 0:
-        invested_amount = (total_buy_cost * remaining_qty) // total_buy_qty
+    remaining_investment = 0
+    if remaining_qty > 0:
+        if unit.matched_buy_cost or unit.matched_buy_brokerage:
+            # FIFO-based remaining cost (includes proportional brokerage).
+            remaining_investment = total_buy_cost - unit.matched_buy_cost - unit.matched_buy_brokerage
+        elif total_buy_qty > 0:
+            remaining_investment = (total_buy_cost * remaining_qty) // total_buy_qty
 
     return TradeUnit(
         contract_key=unit.contract_key,
         trade_label=format_trade_label(unit.equity, unit.first_buy_date, unit.last_sell_date, unit_index),
         contract_display=format_contract_display(unit.equity, unit.type1, unit.type2, unit.strike, unit.expiry),
+        start_date=unit.first_buy_date,
+        end_date=unit.last_sell_date,
         equity=unit.equity,
         type1=unit.type1,
         type2=unit.type2,
@@ -361,10 +383,10 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
         total_buy_cost=total_buy_cost,
         total_sell_value=total_sell_value,
         realized_pnl=unit.realized_pnl,
-        invested_amount=invested_amount,
+        remaining_investment=remaining_investment,
         holding_days=holding_days,
         status=status,
         remaining_qty=remaining_qty,
-        buy_trade_ids=list(unit.buy_trade_ids),
-        sell_trade_ids=list(unit.sell_trade_ids)
+        buy_trade_ids=list(unit.buy_trade_ids or []),
+        sell_trade_ids=list(unit.sell_trade_ids or [])
     )

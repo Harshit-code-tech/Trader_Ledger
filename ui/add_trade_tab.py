@@ -21,8 +21,10 @@ from tkinter import ttk, messagebox
 from datetime import date
 import sqlite3
 from typing import Callable
+from collections import defaultdict
 from core.logger import get_logger
-from core.utils import format_money
+from core.utils import format_money, format_money_abs
+from core.fifo_matcher import fetch_active_trades, match_fifo, FifoMatchError
 from core.trade_validation import normalize_trade_classification
 import config
 
@@ -45,10 +47,12 @@ class AddTradeTab:
         logger.info("Initializing Add Trade tab")
         self.parent = parent
         self.update_status = status_callback
+        self.sell_reference_meta: dict[str, dict[str, int]] = {}
         
         # Create UI
         self.create_widgets()
         self.update_derivative_fields()
+        self.update_sell_reference_fields()
         
         # Set default date to today (only for text entry fallback)
         if not CALENDAR_AVAILABLE:
@@ -104,6 +108,7 @@ class AddTradeTab:
         self.equity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         self.load_equity_dropdown()
+        self.equity_var.trace_add('write', lambda *_: self.update_sell_reference_fields())
         row += 1
         
         # Trade Type
@@ -113,6 +118,7 @@ class AddTradeTab:
         type_frame.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Radiobutton(type_frame, text="BUY", variable=self.trade_type_var, value='BUY').pack(side='left', padx=5)
         ttk.Radiobutton(type_frame, text="SELL", variable=self.trade_type_var, value='SELL').pack(side='left', padx=5)
+        self.trade_type_var.trace_add('write', lambda *_: self.update_sell_reference_fields())
         row += 1
 
         # Type1 (classification)
@@ -146,6 +152,7 @@ class AddTradeTab:
         self.type2_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.type2_hint = ttk.Label(main_frame, text="(CE/PE for options)", font=('Consolas', 9), foreground='gray')
         self.type2_hint.grid(row=row, column=2, sticky='w', padx=5)
+        self.type2_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_sell_reference_fields())
         row += 1
 
         # Strike (options only)
@@ -155,6 +162,7 @@ class AddTradeTab:
         self.strike_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.strike_hint = ttk.Label(main_frame, text="(options only)", font=('Consolas', 9), foreground='gray')
         self.strike_hint.grid(row=row, column=2, sticky='w', padx=5)
+        self.strike_entry.bind('<FocusOut>', lambda _e: self.update_sell_reference_fields())
         row += 1
 
         # Expiry (options/futures)
@@ -174,11 +182,34 @@ class AddTradeTab:
             self.expiry_entry.delete(0, 'end')
             self.expiry_hint = ttk.Label(main_frame, text="", font=('Consolas', 9))
             self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
+            self.expiry_entry.bind('<<DateEntrySelected>>', lambda _e: self.update_sell_reference_fields())
         else:
             self.expiry_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
             self.expiry_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
             self.expiry_hint = ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray')
             self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
+            self.expiry_entry.bind('<FocusOut>', lambda _e: self.update_sell_reference_fields())
+        row += 1
+
+        # Sell reference (SELL only)
+        self.sell_ref_label = ttk.Label(main_frame, text="Sell Against:", font=('Consolas', 10))
+        self.sell_ref_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.sell_ref_var = tk.StringVar()
+        self.sell_ref_entry = ttk.Combobox(
+            main_frame,
+            textvariable=self.sell_ref_var,
+            width=28,
+            state='readonly',
+            font=('Consolas', 10)
+        )
+        self.sell_ref_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.sell_ref_hint = ttk.Label(
+            main_frame,
+            text="(reference only; FIFO applies)",
+            font=('Consolas', 9),
+            foreground='gray'
+        )
+        self.sell_ref_hint.grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Quantity
@@ -293,6 +324,21 @@ class AddTradeTab:
             self.strike_entry.delete(0, tk.END)
             self.expiry_entry.delete(0, tk.END)
             hide_all_derivative_fields()
+        self.update_sell_reference_fields()
+
+    def update_sell_reference_fields(self) -> None:
+        """Show or hide SELL reference selector and refresh options."""
+        if self.trade_type_var.get() != 'SELL':
+            self.sell_ref_label.grid_remove()
+            self.sell_ref_entry.grid_remove()
+            self.sell_ref_hint.grid_remove()
+            self.sell_ref_var.set('')
+            return
+
+        self.sell_ref_label.grid()
+        self.sell_ref_entry.grid()
+        self.sell_ref_hint.grid()
+        self.load_sell_reference_options()
 
     def get_classification_inputs(self) -> tuple[str, str, str, str]:
         """Collect classification inputs with safe defaults for disabled fields."""
@@ -307,6 +353,79 @@ class AddTradeTab:
         if type1_norm == 'futures':
             return type1, '', '', expiry
         return type1, type2, strike, expiry
+
+    def load_sell_reference_options(self) -> None:
+        """Load open BUY lots for the selected contract (reference only)."""
+        self.sell_reference_meta = {}
+        self.sell_ref_entry['values'] = []
+        self.sell_ref_var.set('')
+
+        equity = self.equity_entry.get().strip().upper()
+        if not equity:
+            return
+
+        try:
+            type1_in, type2_in, strike_in, expiry_in = self.get_classification_inputs()
+            type1, type2, strike, expiry = normalize_trade_classification(
+                type1_in,
+                type2_in,
+                strike_in,
+                expiry_in,
+                require_type1=True
+            )
+        except ValueError:
+            return
+
+        try:
+            trades = fetch_active_trades()
+            matches = match_fifo(trades) or []
+        except FifoMatchError as exc:
+            logger.warning(f"Could not load SELL references: {str(exc)}")
+            return
+        except Exception as exc:
+            logger.warning(f"Could not load SELL references: {str(exc)}")
+            return
+
+        matched_by_buy: dict[int, int] = defaultdict(int)
+        for match in matches:
+            matched_by_buy[match['buy_id']] += match['matched_quantity']
+
+        options: list[tuple[str, str]] = []
+        for trade in trades:
+            (trade_id, trade_date, trade_equity, trade_type, trade_type1,
+             trade_type2, trade_strike, trade_expiry, quantity, price_paise, _brokerage, _notes, _is_active) = trade
+
+            if trade_type != 'BUY':
+                continue
+            if trade_equity.strip().upper() != equity:
+                continue
+            if trade_type1 != type1 or trade_type2 != type2 or trade_strike != strike or trade_expiry != expiry:
+                continue
+
+            matched_qty = matched_by_buy.get(trade_id, 0)
+            remaining = quantity - matched_qty
+            if remaining <= 0:
+                continue
+
+            year, month, day = trade_date.split('-')
+            display_date = f"{day}-{month}-{year}"
+            price_display = format_money_abs(price_paise)
+            option_label = f"BUY #{trade_id} | {display_date} | Rem {remaining} | {price_display}"
+            self.sell_reference_meta[option_label] = {
+                'buy_id': trade_id,
+                'remaining_qty': remaining
+            }
+            options.append((trade_date, option_label))
+
+        options.sort(key=lambda item: item[0])
+        self.sell_ref_entry['values'] = [label for _date, label in options]
+
+    def _get_selected_sell_reference(self) -> dict[str, int] | None:
+        """Return selected SELL reference metadata if available."""
+        selected = self.sell_ref_var.get().strip()
+        if not selected:
+            return None
+        return self.sell_reference_meta.get(selected)
     
     def create_recent_trades_table(self, parent: ttk.Frame, row: int) -> None:
         """Create table showing last 5 trades. Display-only, no logic."""
@@ -453,6 +572,27 @@ class AddTradeTab:
         except ValueError as exc:
             logger.warning(f"Validation failed: {str(exc)}")
             return False, str(exc)
+
+        # Enforce SELL reference selection and quantity cap against selected lot
+        if self.trade_type_var.get() == 'SELL':
+            if not self.sell_reference_meta:
+                logger.warning("Validation failed: No open BUY lots available for selected SELL contract")
+                return False, "No open BUY lots available for this contract. Add BUY first or adjust contract details."
+
+            selected_reference = self._get_selected_sell_reference()
+            if not selected_reference:
+                logger.warning("Validation failed: SELL reference not selected")
+                return False, "Select 'Sell Against' BUY lot for this SELL trade."
+
+            selected_remaining = selected_reference['remaining_qty']
+            if quantity > selected_remaining:
+                logger.warning(
+                    f"Validation failed: SELL quantity {quantity} exceeds selected lot remaining {selected_remaining}"
+                )
+                return False, (
+                    f"SELL quantity ({quantity}) exceeds selected BUY lot remaining quantity "
+                    f"({selected_remaining})."
+                )
         
         logger.debug("Input validation passed")
         return True, ""
@@ -503,6 +643,15 @@ class AddTradeTab:
             
             # Normalize equity (uppercase, strip spaces)
             equity = equity.strip().upper()
+
+            if trade_type == 'SELL':
+                selected_reference = self._get_selected_sell_reference()
+                if selected_reference:
+                    ref_note = (
+                        f"[SELL_REF buy_id={selected_reference['buy_id']} "
+                        f"remaining_at_entry={selected_reference['remaining_qty']}]"
+                    )
+                    notes = f"{notes}\n{ref_note}" if notes else ref_note
             
             logger.info(f"Preparing to save trade: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f} on {date_str}")
             logger.debug(f"Trade details - Date: {trade_date}, Equity: {equity}, Type: {trade_type}, Qty: {quantity}, Price: {price_paise} paise, Brokerage: {brokerage_paise} paise")
@@ -533,6 +682,7 @@ class AddTradeTab:
             # Refresh and clear
             logger.debug("Refreshing recent trades display and clearing form")
             self.refresh_recent_trades()
+            self.load_equity_dropdown()
             self.clear_form()
             
         except Exception as e:
@@ -601,6 +751,9 @@ class AddTradeTab:
         self.strike_entry.delete(0, tk.END)
         self.expiry_entry.delete(0, tk.END)
         self.update_derivative_fields()
+        self.sell_ref_var.set('')
+        self.sell_reference_meta = {}
+        self.update_sell_reference_fields()
         self.quantity_entry.delete(0, tk.END)
         self.price_entry.delete(0, tk.END)
         self.brokerage_entry.delete(0, tk.END)

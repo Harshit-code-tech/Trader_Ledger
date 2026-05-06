@@ -19,7 +19,7 @@ import csv
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
-from typing import Callable
+from typing import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -36,7 +36,7 @@ from core.pnl_aggregator import (
     aggregate_pnl_by_equity,
     filter_matches_by_date_range
 )
-from core.open_positions import calculate_open_positions, get_unique_equities
+from core.open_positions import calculate_open_positions, get_unique_equities, OpenPosition
 from core.run_ledger import build_trades_by_id
 from core.utils import format_money, format_money_abs, format_period_label
 
@@ -149,7 +149,8 @@ class ReportsTab:
         self.to_date_var = tk.StringVar(value="")
         self.show_open_positions_var = tk.BooleanVar(value=False)
         self.type1_filter_var = tk.StringVar(value="All")
-        self.expiry_filter_var = tk.StringVar(value="")
+        self.expiry_month_var = tk.StringVar(value="")
+        self.expiry_preset_var = tk.StringVar(value="Custom")
 
         # Open positions / equity
         self.open_positions = []
@@ -180,8 +181,9 @@ class ReportsTab:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        self.canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(self.canvas_window, width=e.width))
         canvas.bind_all('<MouseWheel>', lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         canvas.pack(side="left", fill="both", expand=True)
@@ -481,18 +483,24 @@ class ReportsTab:
         self.type1_filter_entry.pack(side='left', padx=(0, 20))
         self.type1_filter_entry.set("All")
 
-        ttk.Label(row3, text="Expiry:", font=('Arial', 10)).pack(side='left', padx=(0, 5))
-        self.expiry_filter_entry = DateEntry(
-            row3,
-            textvariable=self.expiry_filter_var,
-            date_pattern='yyyy-mm-dd',
-            width=12
-        )
+        ttk.Label(row3, text="Expiry Month:", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+        self.expiry_filter_entry = ttk.Entry(row3, textvariable=self.expiry_month_var, width=12)
         self.expiry_filter_entry.pack(side='left', padx=5)
-        self.expiry_filter_entry.delete(0, 'end')
-        ttk.Label(row3, text="(clear field to disable)", font=('Arial', 8), foreground='gray').pack(
+        ttk.Label(row3, text="(YYYY-MM)", font=('Arial', 8), foreground='gray').pack(
             side='left', padx=(10, 0)
         )
+
+        ttk.Label(row3, text="Preset:", font=('Arial', 10)).pack(side='left', padx=(20, 5))
+        self.expiry_preset_entry = ttk.Combobox(
+            row3,
+            textvariable=self.expiry_preset_var,
+            values=["Custom", "Current Month", "Next Month"],
+            state='readonly',
+            width=14
+        )
+        self.expiry_preset_entry.pack(side='left', padx=5)
+        self.expiry_preset_entry.bind('<<ComboboxSelected>>', lambda _e: self.apply_expiry_preset())
+        self.expiry_filter_entry.bind('<KeyRelease>', lambda _e: self.expiry_preset_var.set("Custom"))
 
         row4 = ttk.Frame(filter_frame)
         row4.pack(fill='x')
@@ -668,13 +676,13 @@ class ReportsTab:
                 ]
                 logger.info(f"Type1 filter {type1_filter} applied: {len(filtered_pnl_results)} matches")
 
-            expiry_filter = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
-            if expiry_filter:
+            expiry_month = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_month_var.get().strip()
+            if expiry_month:
                 filtered_pnl_results = [
                     pnl for pnl in filtered_pnl_results
-                    if trades_by_id[pnl['sell_id']].get('expiry') == expiry_filter
+                    if (trades_by_id[pnl['sell_id']].get('expiry') or "").startswith(expiry_month)
                 ]
-                logger.info(f"Expiry filter {expiry_filter} applied: {len(filtered_pnl_results)} matches")
+                logger.info(f"Expiry month filter {expiry_month} applied: {len(filtered_pnl_results)} matches")
 
             self.open_positions = calculate_open_positions(matches, trades_by_id)
             self.filtered_open_positions = self._filter_open_positions(self.open_positions)
@@ -706,8 +714,8 @@ class ReportsTab:
 
             win_values = [pnl for pnl in sell_totals.values() if pnl > 0]
             loss_values = [pnl for pnl in sell_totals.values() if pnl < 0]
-            avg_win = int(sum(win_values) / len(win_values)) if win_values else 0
-            avg_loss = int(sum(loss_values) / len(loss_values)) if loss_values else 0
+            avg_win = float(sum(win_values) / len(win_values)) if win_values else 0
+            avg_loss = float(sum(loss_values) / len(loss_values)) if loss_values else 0
 
             if losses == 0:
                 win_loss_ratio = "∞" if wins > 0 else "0.00"
@@ -1113,7 +1121,7 @@ class ReportsTab:
                 'from_date': self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip(),
                 'to_date': self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip(),
                 'type1': self.type1_filter_var.get(),
-                'expiry': self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip(),
+                'expiry_month': self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_month_var.get().strip(),
                 'include_open_positions': self.show_open_positions_var.get()
             },
             'summary': {
@@ -1174,7 +1182,7 @@ class ReportsTab:
                 writer.writerow(["From Date", data['filters']['from_date'] or "-"])
                 writer.writerow(["To Date", data['filters']['to_date'] or "-"])
                 writer.writerow(["Type1", data['filters']['type1'] or "All"])
-                writer.writerow(["Expiry", data['filters']['expiry'] or "-"])
+                writer.writerow(["Expiry Month", data['filters']['expiry_month'] or "-"])
                 writer.writerow(["Include Open Positions", str(data['filters']['include_open_positions'])])
                 writer.writerow([])
 
@@ -1252,7 +1260,7 @@ class ReportsTab:
             ws_summary.append(["From Date", data['filters']['from_date'] or "-"])
             ws_summary.append(["To Date", data['filters']['to_date'] or "-"])
             ws_summary.append(["Type1", data['filters']['type1'] or "All"])
-            ws_summary.append(["Expiry", data['filters']['expiry'] or "-"])
+            ws_summary.append(["Expiry Month", data['filters']['expiry_month'] or "-"])
             ws_summary.append(["Include Open Positions", str(data['filters']['include_open_positions'])])
             ws_summary.append([])
             ws_summary.append(["Summary"])
@@ -1314,7 +1322,7 @@ class ReportsTab:
 
         from_date = self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip()
         to_date = self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip()
-        expiry_date = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
+        expiry_month = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_month_var.get().strip()
 
         if from_date and not self._validate_date_format(from_date):
             messagebox.showerror("Invalid Date", "From Date must be in YYYY-MM-DD format")
@@ -1324,8 +1332,8 @@ class ReportsTab:
             messagebox.showerror("Invalid Date", "To Date must be in YYYY-MM-DD format")
             return
 
-        if expiry_date and not self._validate_date_format(expiry_date):
-            messagebox.showerror("Invalid Date", "Expiry must be in YYYY-MM-DD format")
+        if expiry_month and not self._validate_month_format(expiry_month):
+            messagebox.showerror("Invalid Month", "Expiry month must be in YYYY-MM format")
             return
 
         if from_date and to_date and from_date > to_date:
@@ -1334,13 +1342,32 @@ class ReportsTab:
 
         self.calculate_reports()
 
+    def apply_expiry_preset(self) -> None:
+        """Apply expiry month preset selection."""
+        preset = self.expiry_preset_var.get().strip().lower()
+        if preset == "current month":
+            month_str = datetime.now().strftime("%Y-%m")
+        elif preset == "next month":
+            today = datetime.now()
+            year = today.year + (1 if today.month == 12 else 0)
+            month = 1 if today.month == 12 else today.month + 1
+            month_str = f"{year}-{month:02d}"
+        else:
+            return
+
+        self.expiry_month_var.set(month_str)
+        if hasattr(self, 'expiry_filter_entry'):
+            self.expiry_filter_entry.delete(0, 'end')
+            self.expiry_filter_entry.insert(0, month_str)
+
     def clear_filters(self) -> None:
         """Clear all filters and recalculate."""
         logger.info("Clearing all filters")
         self.from_date_var.set("")
         self.to_date_var.set("")
         self.type1_filter_var.set("All")
-        self.expiry_filter_var.set("")
+        self.expiry_month_var.set("")
+        self.expiry_preset_var.set("Custom")
         if hasattr(self, 'from_date_entry'):
             self.from_date_entry.delete(0, 'end')
         if hasattr(self, 'to_date_entry'):
@@ -1394,9 +1421,9 @@ class ReportsTab:
             if equity in current:
                 self.equity_listbox.selection_set(idx)
 
-    def _filter_open_positions(self, positions: list[dict]) -> list[dict]:
-        """Filter open positions by Type1 and Expiry."""
-        filtered = positions
+    def _filter_open_positions(self, positions: Sequence[OpenPosition]) -> list[OpenPosition]:
+        """Filter open positions by Type1 and expiry month."""
+        filtered = list(positions)
         type1_filter = self.type1_filter_var.get().strip().lower()
         if type1_filter and type1_filter != "all":
             filtered = [
@@ -1404,9 +1431,9 @@ class ReportsTab:
                 if (pos.get('type1') or "delivery") == type1_filter
             ]
 
-        expiry_filter = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_filter_var.get().strip()
-        if expiry_filter:
-            filtered = [pos for pos in filtered if pos.get('expiry') == expiry_filter]
+        expiry_month = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_month_var.get().strip()
+        if expiry_month:
+            filtered = [pos for pos in filtered if (pos.get('expiry') or "").startswith(expiry_month)]
 
         return filtered
 
@@ -1624,6 +1651,14 @@ class ReportsTab:
         """Validate date string is in YYYY-MM-DD format."""
         try:
             datetime.strptime(date_str, '%Y-%m-%d')
+            return True
+        except ValueError:
+            return False
+
+    def _validate_month_format(self, month_str: str) -> bool:
+        """Validate month string is in YYYY-MM format."""
+        try:
+            datetime.strptime(month_str, '%Y-%m')
             return True
         except ValueError:
             return False
