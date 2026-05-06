@@ -416,12 +416,35 @@ class ReportsTab:
             exportselection=False,
             yscrollcommand=equity_scroll.set
         )
-        self.equity_listbox.pack(side='left')
+        self.equity_listbox.pack(side='left', fill='y')
         equity_scroll.config(command=self.equity_listbox.yview)
 
         self.equity_listbox.insert(tk.END, "All")
         self.equity_listbox.selection_set(0)
         Tooltip(self.equity_listbox, "Select one or more equities to filter")
+
+        # Enable drag-to-select behavior for usability
+        def _on_equity_mouse_down(event: tk.Event) -> None:  # type: ignore
+            lb = event.widget
+            idx = lb.nearest(event.y)
+            lb.selection_clear(0, 'end')
+            lb.selection_set(idx)
+            lb._anchor = idx
+
+        def _on_equity_drag(event: tk.Event) -> None:  # type: ignore
+            lb = event.widget
+            try:
+                anchor = lb._anchor
+            except AttributeError:
+                anchor = 0
+            idx = lb.nearest(event.y)
+            low = min(anchor, idx)
+            high = max(anchor, idx)
+            lb.selection_clear(0, 'end')
+            lb.selection_set(low, high)
+
+        self.equity_listbox.bind('<Button-1>', _on_equity_mouse_down)
+        self.equity_listbox.bind('<B1-Motion>', _on_equity_drag)
 
         equity_btns = ttk.Frame(row1)
         equity_btns.pack(side='left', padx=(10, 0))

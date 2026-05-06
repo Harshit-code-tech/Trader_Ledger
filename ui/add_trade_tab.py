@@ -210,6 +210,7 @@ class AddTradeTab:
             foreground='gray'
         )
         self.sell_ref_hint.grid(row=row, column=2, sticky='w', padx=5)
+        self.sell_ref_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_price_preview())
         row += 1
         
         # Quantity
@@ -217,6 +218,7 @@ class AddTradeTab:
         self.quantity_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.quantity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(shares)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        self.quantity_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
         row += 1
         
         # Price
@@ -224,6 +226,7 @@ class AddTradeTab:
         self.price_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.price_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(₹ per share)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        self.price_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
         row += 1
         
         # Brokerage
@@ -232,6 +235,12 @@ class AddTradeTab:
         self.brokerage_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.brokerage_entry.insert(0, "0")  # Default to 0
         ttk.Label(main_frame, text="(₹)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
+        self.brokerage_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
+        row += 1
+
+        # Real-time P/L preview (updates when SELL reference, qty, price or brokerage change)
+        self.pnl_preview_label = ttk.Label(main_frame, text="", font=('Consolas', 10), foreground='#34495e')
+        self.pnl_preview_label.grid(row=row, column=1, sticky='w', padx=5, pady=(0, 8))
         row += 1
         
         # Notes
@@ -411,14 +420,23 @@ class AddTradeTab:
             display_date = f"{day}-{month}-{year}"
             price_display = format_money_abs(price_paise)
             option_label = f"BUY #{trade_id} | {display_date} | Rem {remaining} | {price_display}"
+            # Store additional metadata for preview calculation
             self.sell_reference_meta[option_label] = {
                 'buy_id': trade_id,
-                'remaining_qty': remaining
+                'remaining_qty': remaining,
+                'buy_price_paise': price_paise,
+                'buy_brokerage_paise': _brokerage,
+                'buy_qty': quantity
             }
             options.append((trade_date, option_label))
 
         options.sort(key=lambda item: item[0])
         self.sell_ref_entry['values'] = [label for _date, label in options]
+        # Update preview after loading options
+        try:
+            self.update_price_preview()
+        except Exception:
+            pass
 
     def _get_selected_sell_reference(self) -> dict[str, int] | None:
         """Return selected SELL reference metadata if available."""
@@ -426,6 +444,61 @@ class AddTradeTab:
         if not selected:
             return None
         return self.sell_reference_meta.get(selected)
+
+    def update_price_preview(self) -> None:
+        """Update the estimated P/L preview for a SELL trade based on selected reference."""
+        try:
+            if self.trade_type_var.get() != 'SELL':
+                self.pnl_preview_label.config(text="")
+                return
+
+            selected = self._get_selected_sell_reference()
+            if not selected:
+                self.pnl_preview_label.config(text="Select a BUY lot to preview P/L")
+                return
+
+            qty_text = self.quantity_entry.get().strip()
+            price_text = self.price_entry.get().strip()
+            brokerage_text = self.brokerage_entry.get().strip()
+
+            try:
+                qty = int(qty_text)
+                if qty <= 0:
+                    raise ValueError()
+            except Exception:
+                self.pnl_preview_label.config(text="Enter valid Quantity to preview P/L")
+                return
+
+            try:
+                sell_price_paise = int(float(price_text) * 100)
+            except Exception:
+                self.pnl_preview_label.config(text="Enter valid Price to preview P/L")
+                return
+
+            try:
+                sell_brokerage_paise = int(float(brokerage_text) * 100)
+            except Exception:
+                sell_brokerage_paise = 0
+
+            # Cap qty at remaining
+            remaining = selected.get('remaining_qty', 0)
+            use_qty = min(qty, remaining)
+
+            buy_price_paise = selected.get('buy_price_paise', 0)
+            buy_brokerage_paise = selected.get('buy_brokerage_paise', 0)
+            buy_qty = selected.get('buy_qty', 1)
+
+            # Proportion of buy brokerage attributable to matched quantity
+            matched_buy_brokerage = (buy_brokerage_paise * use_qty) // buy_qty if buy_qty else 0
+
+            pnl_paise = (sell_price_paise - buy_price_paise) * use_qty - (sell_brokerage_paise + matched_buy_brokerage)
+
+            # Format
+            sign = '-' if pnl_paise < 0 else '+'
+            self.pnl_preview_label.config(text=f"Estimated realized P/L for {use_qty} units: {sign} {format_money(abs(pnl_paise))}")
+
+        except Exception:
+            self.pnl_preview_label.config(text="Preview unavailable")
     
     def create_recent_trades_table(self, parent: ttk.Frame, row: int) -> None:
         """Create table showing last 5 trades. Display-only, no logic."""

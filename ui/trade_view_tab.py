@@ -22,6 +22,7 @@ class TradeViewTab:
         self.parent = parent
         self.update_status = status_callback
         self.grouping_var = tk.StringVar(value="lifecycle")
+        self.search_var = tk.StringVar(value="")
         self.sort_var = tk.StringVar(value="Date")
         self.show_raw_var = tk.BooleanVar(value=False)
         self.total_trades_var = tk.StringVar(value="0")
@@ -87,6 +88,11 @@ class TradeViewTab:
         self.sort_entry.pack(side='left', padx=(0, 10))
         self.sort_entry.bind('<<ComboboxSelected>>', lambda _e: self.refresh_units())
 
+        ttk.Label(controls, text="Search:", font=('Arial', 10)).pack(side='left', padx=(20, 5))
+        self.search_entry = ttk.Entry(controls, textvariable=self.search_var, width=28)
+        self.search_entry.pack(side='left', padx=(0, 10))
+        self.search_entry.bind('<KeyRelease>', lambda _e: self.refresh_units())
+
         ttk.Checkbutton(
             controls,
             text="Show raw trades",
@@ -126,8 +132,8 @@ class TradeViewTab:
         for col in columns:
             self.units_tree.heading(col, text=col)
 
-        self.units_tree.column('Trade Label', width=240, anchor='w')
-        self.units_tree.column('Contract', width=220, anchor='w')
+        self.units_tree.column('Trade Label', width=420, anchor='w')
+        self.units_tree.column('Contract', width=260, anchor='w')
         self.units_tree.column('Buy Qty', width=80, anchor='e')
         self.units_tree.column('Avg Buy', width=100, anchor='e')
         self.units_tree.column('Sell Qty', width=80, anchor='e')
@@ -181,6 +187,15 @@ class TradeViewTab:
                 pnl_results,
                 grouping=self.grouping_var.get()
             )
+
+            # Apply search filter if provided
+            search_term = self.search_var.get().strip().lower()
+            if search_term:
+                units = [u for u in units if (
+                    search_term in (u.get('trade_label') or '').lower()
+                    or search_term in (u.get('contract_display') or '').lower()
+                    or search_term in (u.get('equity') or '').lower()
+                )]
 
             units = self._sort_units(units)
             self._update_summary(units)

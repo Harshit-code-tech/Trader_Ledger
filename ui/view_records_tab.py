@@ -198,20 +198,26 @@ class ViewRecordsTab:
         vsb.config(command=self.records_tree.yview)
         hsb.config(command=self.records_tree.xview)
         
-        # Configure columns
-        self.records_tree.heading('ID', text='ID')
-        self.records_tree.heading('Date', text='Date')
-        self.records_tree.heading('Stock', text='Stock')
-        self.records_tree.heading('Type', text='Type')
-        self.records_tree.heading('Type1', text='Type1')
-        self.records_tree.heading('Type2', text='Type2')
-        self.records_tree.heading('Strike', text='Strike')
-        self.records_tree.heading('Expiry', text='Expiry')
-        self.records_tree.heading('Qty', text='Qty')
-        self.records_tree.heading('Price', text='Price (₹)')
-        self.records_tree.heading('Brokerage', text='Brokerage (₹)')
-        self.records_tree.heading('Notes', text='Notes')
-        self.records_tree.heading('Status', text='Status')
+        # Configure columns with clickable headings for sorting
+        self._records_sort_state = {}
+        def _make_heading(col_name, display_text=None):
+            text = display_text or col_name
+            self.records_tree.heading(col_name, text=text, command=lambda c=col_name: self._on_records_heading_click(c))
+            self._records_sort_state[col_name] = None
+
+        _make_heading('ID', 'ID')
+        _make_heading('Date', 'Date')
+        _make_heading('Stock', 'Stock')
+        _make_heading('Type', 'Type')
+        _make_heading('Type1', 'Type1')
+        _make_heading('Type2', 'Type2')
+        _make_heading('Strike', 'Strike')
+        _make_heading('Expiry', 'Expiry')
+        _make_heading('Qty', 'Qty')
+        _make_heading('Price', 'Price (₹)')
+        _make_heading('Brokerage', 'Brokerage (₹)')
+        _make_heading('Notes', 'Notes')
+        _make_heading('Status', 'Status')
         
         self.records_tree.column('ID', width=50, anchor='center')
         self.records_tree.column('Date', width=100, anchor='center')
@@ -465,6 +471,16 @@ class ViewRecordsTab:
             self.records_tree.tag_configure('deleted', foreground='gray')
             self.records_tree.tag_configure('sell', background='#ffe6e6')  # Light red
             self.records_tree.tag_configure('buy', background='#e6ffe6')   # Light green
+
+            # Reset headings arrows (if any)
+            for col, state in self._records_sort_state.items():
+                # remove any arrow from heading text
+                heading_text = col
+                if col == 'Price':
+                    heading_text = 'Price (₹)'
+                elif col == 'Brokerage':
+                    heading_text = 'Brokerage (₹)'
+                self.records_tree.heading(col, text=heading_text)
             
             # Update info label
             self.info_label.config(text=f"Total: {len(trades)} records")
@@ -702,6 +718,63 @@ class ViewRecordsTab:
         edit_entry.bind('<Return>', save_edit)
         edit_entry.bind('<FocusOut>', save_edit)
         edit_entry.bind('<Escape>', cancel_edit)
+
+    def _on_records_heading_click(self, col: str) -> None:
+        """Toggle sort order for the given column and sort the treeview."""
+        # Determine new sort order
+        current = self._records_sort_state.get(col)
+        reverse = False if current is None or current is False else True
+        # Toggle
+        self._records_sort_state[col] = not reverse
+
+        # Fetch items and sort
+        items = list(self.records_tree.get_children(''))
+
+        def _val(item):
+            v = self.records_tree.set(item, col)
+            if col in ('ID', 'Qty'):
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+            if col in ('Price', 'Brokerage'):
+                try:
+                    s = v.replace('₹', '').replace(',', '').strip()
+                    return float(s)
+                except Exception:
+                    return 0.0
+            if col == 'Date':
+                try:
+                    # Display date is DD-MM-YYYY
+                    day, month, year = v.split('-')
+                    return datetime.strptime(f"{year}-{month}-{day}", '%Y-%m-%d')
+                except Exception:
+                    return datetime.min
+            return v.lower() if isinstance(v, str) else v
+
+        items.sort(key=_val, reverse=self._records_sort_state[col])
+
+        # Rearrange
+        for index, iid in enumerate(items):
+            self.records_tree.move(iid, '', index)
+
+        # Update heading visuals (arrow)
+        arrow = ' ▲' if self._records_sort_state[col] else ' ▼'
+        # Reset all headings
+        for c in self._records_sort_state.keys():
+            text = c
+            if c == 'Price':
+                text = 'Price (₹)'
+            elif c == 'Brokerage':
+                text = 'Brokerage (₹)'
+            self.records_tree.heading(c, text=text)
+        # Set arrow
+        display = col
+        if col == 'Price':
+            display = 'Price (₹)'
+        elif col == 'Brokerage':
+            display = 'Brokerage (₹)'
+        self.records_tree.heading(col, text=display + arrow)
     
     def update_inline_edit(self, item: str, col_index: int, col_name: str, new_value: str) -> None:
         """Update database with inline edited value."""
