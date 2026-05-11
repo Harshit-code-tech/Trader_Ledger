@@ -23,6 +23,10 @@ def allocate_proportional_amount(
     """
     Allocate total_amount proportionally to matched quantities.
 
+    Allocation order rule (deterministic):
+    - match_quantities must be provided in FIFO match order
+    - remainder paise is assigned to the LAST match in that order
+
     - total_amount: full trade amount (paise)
     - trade_quantity: original trade quantity
     - match_quantities: matched quantities (FIFO order)

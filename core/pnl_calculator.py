@@ -53,6 +53,10 @@ def allocate_brokerage(total_brokerage: int, trade_quantity: int, match_quantiti
     Allocate brokerage proportionally to matched quantities.
     For partial sells, only the matched portion consumes brokerage.
     Remainder stays with any open quantity.
+
+    Allocation order rule (deterministic):
+    - match_quantities must be FIFO match order
+    - remainder paise is assigned to the LAST match in that order
     """
     match_sum = sum(match_quantities)
     if match_sum > trade_quantity:

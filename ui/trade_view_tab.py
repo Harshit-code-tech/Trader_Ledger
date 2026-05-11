@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Callable
+from typing import Any, Callable, Mapping, Sequence
 from datetime import datetime
 
 from core.fifo_matcher import fetch_active_trades, match_fifo
@@ -116,7 +116,7 @@ class TradeViewTab:
 
         columns = (
             'Trade Label', 'Contract', 'Buy Qty', 'Avg Buy', 'Sell Qty', 'Avg Sell',
-            'P/L', 'MTF Interest', 'Net P/L', 'Holding Days', 'Status', 'Remaining Qty'
+            'Gross P/L', 'MTF Interest', 'Net P/L', 'Holding Days', 'Status', 'Remaining Qty'
         )
 
         self.units_tree = ttk.Treeview(
@@ -157,7 +157,7 @@ class TradeViewTab:
 
         self.help_tip = ttk.Label(
             main_frame,
-            text="Remaining Investment = FIFO remaining cost (incl. brokerage).",
+            text="Gross P/L excludes MTF interest. Net P/L = Gross P/L - MTF interest.",
             font=('Arial', 9),
             foreground='gray'
         )
@@ -257,6 +257,38 @@ class TradeViewTab:
                     ""
                 ), tags=('detail',))
 
+                # Audit explainability for sell grouping (match-level breakdown)
+                if self.grouping_var.get() == 'sell' and unit['sell_trade_ids']:
+                    sell_id = unit['sell_trade_ids'][0]
+                    for match in [p for p in pnl_results if p['sell_id'] == sell_id]:
+                        buy_total = match['buy_cost'] + match['buy_brokerage_alloc']
+                        sell_total = match['sell_value'] - match['sell_brokerage_alloc']
+                        mtf_amount = match.get('matched_mtf_amount', 0)
+                        mtf_interest = match.get('mtf_interest', 0)
+                        holding_days = match.get('holding_days', 0)
+                        net_pnl = match.get('net_pnl', match['realized_pnl'])
+                        audit_text = (
+                            f"BUY #{match['buy_id']} qty {match['matched_quantity']} | "
+                            f"Buy total {format_money_abs(buy_total)} (brk {format_money_abs(match['buy_brokerage_alloc'])}) | "
+                            f"Sell total {format_money_abs(sell_total)} (brk {format_money_abs(match['sell_brokerage_alloc'])}) | "
+                            f"MTF amt {format_money_abs(mtf_amount)} | Days {holding_days} | "
+                            f"Interest {format_money_abs(mtf_interest)} | Net {format_money(net_pnl)}"
+                        )
+                        self.units_tree.insert(parent_id, 'end', values=(
+                            audit_text,
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            ""
+                        ), tags=('detail',))
+
                 if self.show_raw_var.get():
                     self._insert_raw_trades(parent_id, unit, trades)
 
@@ -267,14 +299,14 @@ class TradeViewTab:
             messagebox.showerror("Error", f"Failed to load trade units:\n{str(exc)}")
             self.update_status("❌ Error loading trade units")
 
-    def _sort_units(self, units: list[dict]) -> list[dict]:
+    def _sort_units(self, units: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
         mode = self.sort_var.get().strip().lower()
         if mode == "profit/loss":
             return sorted(units, key=lambda u: u['realized_pnl'], reverse=True)
         if mode == "holding days":
             return sorted(units, key=lambda u: u['holding_days'], reverse=True)
 
-        def sort_date(unit: dict) -> datetime:
+        def sort_date(unit: Mapping[str, Any]) -> datetime:
             date_str = unit.get('end_date') or unit.get('start_date')
             if not date_str:
                 return datetime.min
@@ -282,7 +314,7 @@ class TradeViewTab:
 
         return sorted(units, key=sort_date, reverse=True)
 
-    def _update_summary(self, units: list[dict]) -> None:
+    def _update_summary(self, units: Sequence[Mapping[str, Any]]) -> None:
         total_trades = len(units)
         closed_trades = sum(1 for u in units if u['status'] == 'Closed')
         open_trades = sum(1 for u in units if u['status'] == 'Open')
@@ -293,7 +325,7 @@ class TradeViewTab:
         self.open_trades_var.set(str(open_trades))
         self.total_pnl_var.set(format_money(total_pnl))
 
-    def _insert_raw_trades(self, parent_id: str, unit: dict, trades: list[tuple]) -> None:
+    def _insert_raw_trades(self, parent_id: str, unit: Mapping[str, Any], trades: list[tuple]) -> None:
         trades_by_id = {trade[0]: trade for trade in trades}
         trade_ids = unit['buy_trade_ids'] + unit['sell_trade_ids']
         for trade_id in trade_ids:

@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from core.allocations import allocate_proportional_amount, round_divide
 
@@ -18,12 +18,16 @@ def _calendar_holding_days(buy_date: str, sell_date: str) -> int:
 
 
 def apply_mtf_interest(
-    match_results: Iterable[dict],
-    trades_by_id: dict[int, dict],
+    match_results: Iterable[Mapping[str, Any]],
+    trades_by_id: Mapping[int, Mapping[str, Any]],
     annual_rate_ppm: int = ANNUAL_RATE_PPM
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Enrich match results with MTF interest and net P/L.
+
+    Allocation order rule (deterministic):
+    - matched quantities are consumed in FIFO match order
+    - remainder paise is assigned to the LAST match for the BUY trade
 
     Returns a new list of dicts with fields:
     - matched_mtf_amount
@@ -54,7 +58,7 @@ def apply_mtf_interest(
         mtf_allocs_by_buy[buy_id] = allocs
 
     mtf_alloc_idx: defaultdict[int, int] = defaultdict(int)
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
 
     for match in match_list:
         buy_id = match['buy_id']

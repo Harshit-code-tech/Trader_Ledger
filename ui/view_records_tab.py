@@ -26,6 +26,7 @@ from core.logger import get_logger
 from core.utils import format_money
 from core.trade_validation import normalize_trade_classification
 from core.brokerage import calculate_brokerage_auto
+from core.utils import make_trade_ts
 import config
 
 logger = get_logger('ui.view_records_tab')
@@ -434,7 +435,7 @@ class ViewRecordsTab:
                 # Normalize display values
                 type1_display = (type1 or "delivery").upper()
                 type2_display = type2 if type2 else ""
-                    strike_display = f"{strike:.2f}" if strike is not None else ""
+                strike_display = f"{strike:.2f}" if strike is not None else ""
                 expiry_display = ""
                 if expiry:
                     year_e, month_e, day_e = expiry.split('-')
@@ -474,7 +475,7 @@ class ViewRecordsTab:
             self.records_tree.tag_configure('buy', background='#e6ffe6')   # Light green
 
             # Reset headings arrows (if any)
-            for col, state in self._records_sort_state.items():
+            for col in self._records_sort_state:
                 # remove any arrow from heading text
                 heading_text = col
                 if col == 'Price':
@@ -491,6 +492,60 @@ class ViewRecordsTab:
             logger.error(f"Failed to load records: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to load records:\n{str(e)}")
             self.update_status("❌ Error loading records")
+
+    def _build_trade_filters(self) -> tuple[str, list]:
+        """Build SQL WHERE filters from current UI filter state."""
+        where_clause = " WHERE 1=1"
+        params: list = []
+
+        equity_filter = self.equity_filter.get()
+        if equity_filter and equity_filter != "All":
+            where_clause += " AND equity = ?"
+            params.append(equity_filter)
+
+        type_filter = self.type_filter.get()
+        if type_filter and type_filter != "All":
+            where_clause += " AND trade_type = ?"
+            params.append(type_filter)
+
+        date_from = self.date_from_entry.get().strip()
+        if date_from:
+            try:
+                day, month, year = date_from.split('-')
+                where_clause += " AND trade_date >= ?"
+                params.append(f"{year}-{month}-{day}")
+            except ValueError:
+                logger.warning(f"Invalid date format for 'from': {date_from}")
+
+        date_to = self.date_to_entry.get().strip()
+        if date_to:
+            try:
+                day, month, year = date_to.split('-')
+                where_clause += " AND trade_date <= ?"
+                params.append(f"{year}-{month}-{day}")
+            except ValueError:
+                logger.warning(f"Invalid date format for 'to': {date_to}")
+
+        if not self.show_deleted_trades.get():
+            where_clause += " AND is_active = 1"
+
+        return where_clause, params
+
+    def _fetch_filtered_trades_for_export(self) -> list[tuple]:
+        """Fetch filtered trade rows with full v1.1 fields for export."""
+        where_clause, params = self._build_trade_filters()
+        query = (
+            "SELECT id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry, "
+            "quantity, price, brokerage, brokerage_auto, brokerage_override, mtf_amount, notes, is_active "
+            f"FROM trade_events{where_clause} ORDER BY id DESC"
+        )
+
+        conn = sqlite3.connect(str(config.DB_PATH))
+        c = conn.cursor()
+        c.execute(query, params)
+        rows = c.fetchall()
+        conn.close()
+        return rows
     
     def apply_filters(self) -> None:
         """Apply current filters and refresh."""
@@ -570,7 +625,7 @@ class ViewRecordsTab:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
-                SELECT trade_date, equity, trade_type, type1, type2, strike, expiry,
+                SELECT trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                        quantity, price, brokerage, brokerage_auto, brokerage_override,
                        mtf_amount, notes, is_active
                 FROM trade_events
@@ -858,6 +913,7 @@ Optional Columns:
 • Brokerage (in rupees, default 0)
 • BrokerageOverride (in rupees, optional)
 • MtfAmount (in rupees, required for MTF BUY only)
+• TradeTS (YYYY-MM-DD HH:MM:SS, optional IST timestamp)
 • Notes (any text)
 • Type1 (intraday/delivery/mtf/futures/options)
 • Type2 (CE/PE, required for options only)
@@ -866,10 +922,10 @@ Optional Columns:
 
 Example CSV:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,Notes,Type1,Type2,Strike,Expiry
-20-01-2026,TCS,BUY,10,350.50,10.00,,0,Sample trade,delivery,,,
-21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,Another trade,intraday,,,
-22-01-2026,NIFTY,BUY,50,12.00,2.00,,0,Options entry,options,CE,22500,25-01-2026
+Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
+20-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-20 09:30:00,Sample trade,delivery,,,
+21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,2026-01-21 10:05:00,Another trade,intraday,,,
+22-01-2026,NIFTY,BUY,50,12.00,2.00,,0,2026-01-22 11:00:00,Options entry,options,CE,22500,25-01-2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample file available at:
@@ -962,19 +1018,31 @@ Tips:
                         brokerage_paise = 0
                         if 'Brokerage' in row and row['Brokerage'].strip():
                             brokerage_rupees = float(row['Brokerage'])
+                            if brokerage_rupees < 0:
+                                raise ValueError("Brokerage must be >= 0")
                             brokerage_paise = int(brokerage_rupees * 100)
 
                         brokerage_override = None
                         if 'BrokerageOverride' in row and row['BrokerageOverride'].strip():
                             override_rupees = float(row['BrokerageOverride'])
+                            if override_rupees < 0:
+                                raise ValueError("Brokerage override must be >= 0")
                             brokerage_override = int(override_rupees * 100)
 
                         mtf_amount_paise = 0
                         if 'MtfAmount' in row and row['MtfAmount'].strip():
                             mtf_amount_rupees = float(row['MtfAmount'])
+                            if mtf_amount_rupees < 0:
+                                raise ValueError("MTF amount must be >= 0")
                             mtf_amount_paise = int(mtf_amount_rupees * 100)
                         
                         notes = row.get('Notes', '').strip()
+
+                        trade_ts = ""
+                        if 'TradeTS' in row and row['TradeTS'].strip():
+                            trade_ts = row['TradeTS'].strip()
+                        if not trade_ts:
+                            trade_ts = make_trade_ts(trade_date, "09:15:00")
 
                         type1_raw = (row.get('Type1') or '').strip()
                         type2_raw = (row.get('Type2') or '').strip()
@@ -997,6 +1065,11 @@ Tips:
                         if type1_norm == 'mtf' and trade_type == 'BUY' and mtf_amount_paise <= 0:
                             raise ValueError("MTF amount is required for MTF BUY trades")
 
+                        if type1_norm == 'mtf' and trade_type == 'BUY':
+                            trade_amount = quantity * price_paise
+                            if mtf_amount_paise > trade_amount:
+                                raise ValueError("MTF amount cannot exceed buy trade amount")
+
                         # Determine brokerage auto/override
                         if brokerage_override is not None:
                             brokerage_auto = 0
@@ -1018,13 +1091,13 @@ Tips:
                         cursor.execute("""
                             INSERT INTO trade_events (
                                 trade_date, equity, trade_type, quantity, price, brokerage,
-                                brokerage_auto, brokerage_override, mtf_amount, notes,
+                                brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
                                 type1, type2, strike, expiry, is_active
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                         """, (
                             trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                            brokerage_auto, brokerage_override, mtf_amount_paise, notes,
+                            brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
                             type1, type2, strike, expiry
                         ))
                         
@@ -1067,11 +1140,7 @@ Tips:
             filepath = config.EXPORTS_DIR / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
             
-            # Get all displayed rows
-            rows = []
-            for item in self.records_tree.get_children():
-                values = self.records_tree.item(item, 'values')
-                rows.append(values)
+            rows = self._fetch_filtered_trades_for_export()
             
             if not rows:
                 messagebox.showwarning("No Data", "No records to export")
@@ -1080,13 +1149,50 @@ Tips:
             # Write CSV
             with open(filepath, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # Header
                 writer.writerow([
-                    'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
-                    'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+                    'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+                    'Qty', 'PriceRupees', 'PricePaise',
+                    'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
+                    'MtfAmountRupees', 'MtfAmountPaise', 'Notes', 'Status'
                 ])
-                # Data
-                writer.writerows(rows)
+
+                for row in rows:
+                    (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
+                     quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
+                     mtf_amount_paise, notes, is_active) = row
+
+                    display_date = ""
+                    if trade_date:
+                        year, month, day = trade_date.split('-')
+                        display_date = f"{day}-{month}-{year}"
+
+                    expiry_display = ""
+                    if expiry:
+                        year_e, month_e, day_e = expiry.split('-')
+                        expiry_display = f"{day_e}-{month_e}-{year_e}"
+
+                    writer.writerow([
+                        trade_id,
+                        display_date,
+                        trade_ts or "",
+                        equity,
+                        trade_type,
+                        (type1 or "delivery").upper(),
+                        type2 or "",
+                        "" if strike is None else f"{strike:.2f}",
+                        expiry_display,
+                        quantity,
+                        f"{(price_paise or 0) / 100:.2f}",
+                        int(price_paise or 0),
+                        f"{(brokerage_paise or 0) / 100:.2f}",
+                        int(brokerage_paise or 0),
+                        int(brokerage_auto or 0),
+                        "" if brokerage_override is None else int(brokerage_override),
+                        f"{(mtf_amount_paise or 0) / 100:.2f}",
+                        int(mtf_amount_paise or 0),
+                        notes or "",
+                        "Active" if is_active == 1 else "Deleted"
+                    ])
             
             logger.info(f"✅ Exported {len(rows)} records to {filepath}")
             self.update_status(f"✅ Exported to {filename}")
@@ -1120,11 +1226,7 @@ Tips:
             filepath = config.EXPORTS_DIR / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
             
-            # Get all displayed rows
-            rows = []
-            for item in self.records_tree.get_children():
-                values = self.records_tree.item(item, 'values')
-                rows.append(values)
+            rows = self._fetch_filtered_trades_for_export()
             
             if not rows:
                 messagebox.showwarning("No Data", "No records to export")
@@ -1137,8 +1239,10 @@ Tips:
             
             # Header row
             headers = [
-                'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
-                'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+                'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
+                'Qty', 'PriceRupees', 'PricePaise',
+                'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
+                'MtfAmountRupees', 'MtfAmountPaise', 'Notes', 'Status'
             ]
             ws.append(headers)
             
@@ -1153,7 +1257,42 @@ Tips:
             
             # Data rows
             for row in rows:
-                ws.append(row)
+                (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
+                 quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
+                 mtf_amount_paise, notes, is_active) = row
+
+                display_date = ""
+                if trade_date:
+                    year, month, day = trade_date.split('-')
+                    display_date = f"{day}-{month}-{year}"
+
+                expiry_display = ""
+                if expiry:
+                    year_e, month_e, day_e = expiry.split('-')
+                    expiry_display = f"{day_e}-{month_e}-{year_e}"
+
+                ws.append([
+                    trade_id,
+                    display_date,
+                    trade_ts or "",
+                    equity,
+                    trade_type,
+                    (type1 or "delivery").upper(),
+                    type2 or "",
+                    "" if strike is None else float(strike),
+                    expiry_display,
+                    quantity,
+                    float((price_paise or 0) / 100),
+                    int(price_paise or 0),
+                    float((brokerage_paise or 0) / 100),
+                    int(brokerage_paise or 0),
+                    int(brokerage_auto or 0),
+                    "" if brokerage_override is None else int(brokerage_override),
+                    float((mtf_amount_paise or 0) / 100),
+                    int(mtf_amount_paise or 0),
+                    notes or "",
+                    "Active" if is_active == 1 else "Deleted"
+                ])
             
             # Auto-width columns
             for column in ws.columns:
@@ -1287,14 +1426,15 @@ class EditTradeDialog:
         self.dialog.grab_set()
         
         # Unpack trade data
-        (trade_date, equity, trade_type, type1, type2, strike, expiry,
-         quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
+        (trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
+         quantity, price_paise, brokerage_paise, _brokerage_auto, brokerage_override,
          mtf_amount_paise, notes, _) = trade_data
         
         # Convert for display
         price_rupees = price_paise / 100
         brokerage_rupees = brokerage_paise / 100
         mtf_amount_rupees = (mtf_amount_paise or 0) / 100
+        self.trade_ts = trade_ts
         year, month, day = trade_date.split('-')
         display_date = f"{day}-{month}-{year}"
         
@@ -1485,10 +1625,22 @@ class EditTradeDialog:
             date_str = self.date_entry.get().strip()
             day, month, year = date_str.split('-')
             trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            time_part = "09:15:00"
+            if getattr(self, 'trade_ts', None) and ' ' in self.trade_ts:
+                time_part = self.trade_ts.split(' ', 1)[1]
+            trade_ts = make_trade_ts(trade_date, time_part)
             
             equity = self.equity_entry.get().strip().upper()
             trade_type = self.trade_type_var.get()
             quantity = int(self.quantity_entry.get())
+
+            type1, type2, strike, expiry = normalize_trade_classification(
+                self.type1_var.get(),
+                self.type2_var.get(),
+                self.strike_entry.get(),
+                self.expiry_entry.get(),
+                require_type1=True
+            )
             
             price_rupees = float(self.price_entry.get())
             price_paise = int(price_rupees * 100)
@@ -1500,8 +1652,9 @@ class EditTradeDialog:
                 brokerage_auto = 0
             else:
                 try:
+                    type1_for_calc = type1 or "delivery"
                     brokerage_paise, _rate_ppm = calculate_brokerage_auto(
-                        quantity, price_paise, type1, trade_type
+                        quantity, price_paise, type1_for_calc, trade_type
                     )
                     brokerage_auto = brokerage_paise
                     brokerage_override = None
@@ -1514,17 +1667,18 @@ class EditTradeDialog:
 
             mtf_amount_rupees = float(self.mtf_amount_entry.get() or 0)
             mtf_amount_paise = int(mtf_amount_rupees * 100)
+
+            if type1 == 'mtf' and trade_type == 'BUY':
+                if mtf_amount_paise <= 0:
+                    messagebox.showerror("Invalid MTF Amount", "MTF amount is required for MTF BUY trades")
+                    return
+                trade_amount = quantity * price_paise
+                if mtf_amount_paise > trade_amount:
+                    messagebox.showerror("Invalid MTF Amount", "MTF amount cannot exceed buy trade amount")
+                    return
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
 
-            type1, type2, strike, expiry = normalize_trade_classification(
-                self.type1_var.get(),
-                self.type2_var.get(),
-                self.strike_entry.get(),
-                self.expiry_entry.get(),
-                require_type1=True
-            )
-            
             logger.info(f"Updating trade ID {self.trade_id}: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
             
             # Update database
@@ -1532,12 +1686,12 @@ class EditTradeDialog:
             c = conn.cursor()
             c.execute("""
                 UPDATE trade_events
-                SET trade_date = ?, equity = ?, trade_type = ?, type1 = ?, type2 = ?,
+                SET trade_date = ?, trade_ts = ?, equity = ?, trade_type = ?, type1 = ?, type2 = ?,
                     strike = ?, expiry = ?, quantity = ?, price = ?, brokerage = ?,
                     brokerage_auto = ?, brokerage_override = ?, mtf_amount = ?, notes = ?
                 WHERE id = ?
             """, (
-                trade_date, equity, trade_type, type1, type2, strike, expiry,
+                trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                 quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
                 mtf_amount_paise, notes, self.trade_id
             ))

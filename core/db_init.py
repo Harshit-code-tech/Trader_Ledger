@@ -47,6 +47,7 @@ def init_database(db_path: str | None = None) -> bool:
                 brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0),
                 brokerage_override NUMERIC CHECK (brokerage_override >= 0),
                 mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0),
+                trade_ts TEXT,
                 notes TEXT,
                 type1 TEXT CHECK (type1 IN ("intraday", "delivery", "mtf", "futures", "options") OR type1 IS NULL),
                 type2 TEXT CHECK (type2 IN ("CE", "PE") OR type2 IS NULL),
@@ -66,12 +67,20 @@ def init_database(db_path: str | None = None) -> bool:
             "expiry": "expiry DATE",
             "brokerage_auto": "brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0)",
             "brokerage_override": "brokerage_override NUMERIC CHECK (brokerage_override >= 0)",
-            "mtf_amount": "mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0)"
+            "mtf_amount": "mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0)",
+            "trade_ts": "trade_ts TEXT"
         }
         for column_name, column_def in columns_to_add.items():
             if column_name not in existing_columns:
                 cursor.execute(f"ALTER TABLE trade_events ADD COLUMN {column_def}")
                 logger.info(f"Added column '{column_name}' to trade_events")
+                existing_columns.add(column_name)
+
+        if "trade_ts" in existing_columns:
+            cursor.execute(
+                "UPDATE trade_events SET trade_ts = trade_date || ' 09:15:00' "
+                "WHERE trade_ts IS NULL OR trade_ts = ''"
+            )
         
         conn.commit()
         

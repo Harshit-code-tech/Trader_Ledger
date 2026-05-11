@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import dataclass
 from typing import TypedDict
 import config
 from core.trade_validation import normalize_trade_classification
@@ -31,16 +32,40 @@ TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None
 ContractKey = tuple[str, str, str | None, float | None, str | None]
 
 
+@dataclass(frozen=True)
+class TradeRecord:
+    id: int
+    trade_date: str
+    equity: str
+    trade_type: str
+    type1: str
+    type2: str | None
+    strike: float | None
+    expiry: str | None
+    quantity: int
+    price: int
+    brokerage: int
+    notes: str
+    is_active: int
+    brokerage_auto: int
+    brokerage_override: int | None
+    mtf_amount: int
+
+    @classmethod
+    def from_tuple(cls, trade: TradeTuple) -> "TradeRecord":
+        return cls(*trade)
+
+
 def fetch_active_trades() -> list[TradeTuple]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-         SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-             quantity, price, brokerage, notes, is_active,
-             brokerage_auto, brokerage_override, mtf_amount
+           SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+               quantity, price, brokerage, notes, is_active,
+               brokerage_auto, brokerage_override, mtf_amount
         FROM trade_events
         WHERE is_active = 1
-        ORDER BY trade_date, id
+           ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
     ''')
     trades = cursor.fetchall()
     conn.close()

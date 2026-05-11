@@ -1,4 +1,4 @@
-from core.fifo_matcher import fetch_active_trades, match_fifo, TradeTuple, FifoMatchError
+from core.fifo_matcher import fetch_active_trades, match_fifo, TradeTuple, TradeRecord, FifoMatchError
 from core.pnl_calculator import calculate_match_pnl, TradeDict, PnlResult, PnlCalculationError
 from core.pnl_aggregator import aggregate_pnl_by_date, aggregate_pnl_by_month
 from core.mtf_interest import apply_mtf_interest
@@ -23,28 +23,32 @@ def get_equities(trades_by_id: dict[int, TradeDict]) -> list[str]:
     return sorted({t['equity'] for t in trades_by_id.values()})
 
 def build_trades_by_id(trades: list[TradeTuple]) -> dict[int, TradeDict]:
-    return {t[0]: TradeDict(
-        id=t[0],
-        trade_date=t[1],
-        equity=t[2],
-        trade_type=t[3],
-        type1=t[4] or "delivery",
-        type2=t[5],
-        strike=t[6],
-        expiry=t[7],
-        quantity=t[8],
-        price=t[9],
-        brokerage=get_effective_brokerage({
-            'brokerage': t[10],
-            'brokerage_auto': t[13],
-            'brokerage_override': t[14]
-        }),
-        notes=t[11],
-        is_active=t[12],
-        brokerage_auto=t[13],
-        brokerage_override=t[14],
-        mtf_amount=t[15]
-    ) for t in trades}
+    trades_by_id: dict[int, TradeDict] = {}
+    for trade in trades:
+        record = TradeRecord.from_tuple(trade)
+        trades_by_id[record.id] = TradeDict(
+            id=record.id,
+            trade_date=record.trade_date,
+            equity=record.equity,
+            trade_type=record.trade_type,
+            type1=record.type1 or "delivery",
+            type2=record.type2,
+            strike=record.strike,
+            expiry=record.expiry,
+            quantity=record.quantity,
+            price=record.price,
+            brokerage=get_effective_brokerage({
+                'brokerage': record.brokerage,
+                'brokerage_auto': record.brokerage_auto,
+                'brokerage_override': record.brokerage_override
+            }),
+            notes=record.notes,
+            is_active=record.is_active,
+            brokerage_auto=record.brokerage_auto,
+            brokerage_override=record.brokerage_override,
+            mtf_amount=record.mtf_amount
+        )
+    return trades_by_id
 
 def main() -> None:
     try:

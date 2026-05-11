@@ -16,6 +16,7 @@ Does NOT:
 """
 
 import csv
+import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
@@ -41,6 +42,7 @@ from core.pnl_aggregator import (
 from core.open_positions import calculate_open_positions, get_unique_equities, OpenPosition
 from core.run_ledger import build_trades_by_id
 from core.utils import format_money, format_money_abs, format_period_label
+from core.allocations import round_divide
 
 logger = get_logger('ui.reports_tab')
 
@@ -159,6 +161,8 @@ class ReportsTab:
         self.filtered_open_positions = []
         self.equity_pnl = {}
         self.analytics = {}
+        self.audit_matches = []
+        self.audit_trades_by_id = {}
 
         # Validation state
         self.has_validation_errors = False
@@ -267,6 +271,15 @@ class ReportsTab:
         )
         export_csv_btn.pack(side='right', padx=5)
         Tooltip(export_csv_btn, "Export the current report to CSV")
+
+        export_audit_btn = ttk.Button(
+            actions_frame,
+            text="⬇️ Audit CSV",
+            command=self.export_audit_csv,
+            width=14
+        )
+        export_audit_btn.pack(side='right', padx=5)
+        Tooltip(export_audit_btn, "Export match-level audit details to CSV, including allocation remainder flags")
 
         export_excel_btn = ttk.Button(
             actions_frame,
@@ -429,7 +442,7 @@ class ReportsTab:
         def _on_equity_mouse_down(event: tk.Event) -> None:  # type: ignore
             lb = event.widget
             idx = lb.nearest(event.y)
-            lb.selection_clear(0, 'end')
+            lb.selection_clear()
             lb.selection_set(idx)
             lb._anchor = idx
 
@@ -442,7 +455,7 @@ class ReportsTab:
             idx = lb.nearest(event.y)
             low = min(anchor, idx)
             high = max(anchor, idx)
-            lb.selection_clear(0, 'end')
+            lb.selection_clear()
             lb.selection_set(low, high)
 
         self.equity_listbox.bind('<Button-1>', _on_equity_mouse_down)
@@ -713,6 +726,9 @@ class ReportsTab:
                 ]
                 logger.info(f"Expiry month filter {expiry_month} applied: {len(filtered_pnl_results)} matches")
 
+            self.audit_matches = list(filtered_pnl_results)
+            self.audit_trades_by_id = trades_by_id
+
             self.open_positions = calculate_open_positions(matches, trades_by_id)
             self.filtered_open_positions = self._filter_open_positions(self.open_positions)
             equities = ["All"] + get_unique_equities(trades_by_id)
@@ -942,6 +958,8 @@ class ReportsTab:
         self.open_positions = []
         self.filtered_open_positions = []
         self.equity_pnl = {}
+        self.audit_matches = []
+        self.audit_trades_by_id = {}
 
         self.profit_label.config(text="₹ +0.00")
         self.loss_label.config(text="₹ -0.00")
@@ -1206,6 +1224,185 @@ class ReportsTab:
                     data['open_positions'].append(values)
 
         return data
+
+    def _get_trade_ts_map(self, trade_ids: set[int]) -> dict[int, str]:
+        """Fetch trade timestamps for audit export (fallback to 09:15:00)."""
+        if not trade_ids:
+            return {}
+
+        ids = sorted(trade_ids)
+        placeholders = ",".join("?" for _ in ids)
+        conn = sqlite3.connect(str(config.DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT id, trade_date, trade_ts FROM trade_events WHERE id IN ({placeholders})",
+            ids
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        trade_ts_map: dict[int, str] = {}
+        for trade_id, trade_date, trade_ts in rows:
+            if trade_ts:
+                trade_ts_map[trade_id] = trade_ts
+            elif trade_date:
+                trade_ts_map[trade_id] = f"{trade_date} 09:15:00"
+            else:
+                trade_ts_map[trade_id] = ""
+
+        return trade_ts_map
+
+    def _build_remainder_flag_by_match_index(self) -> dict[int, str]:
+        """Mark rows where deterministic allocation remainder was applied."""
+        flags: dict[int, list[str]] = {}
+        if not self.audit_matches:
+            return {}
+
+        buy_indices: dict[int, list[int]] = {}
+        sell_indices: dict[int, list[int]] = {}
+        for idx, match in enumerate(self.audit_matches):
+            buy_indices.setdefault(match['buy_id'], []).append(idx)
+            sell_indices.setdefault(match['sell_id'], []).append(idx)
+
+        def has_remainder(total_amount: int, trade_qty: int, qtys: list[int]) -> bool:
+            matched_total = sum(qtys)
+            if trade_qty <= 0 or matched_total <= 0:
+                return False
+            proportional_total = round_divide(total_amount * matched_total, trade_qty)
+            base_alloc_sum = sum((proportional_total * qty) // matched_total for qty in qtys)
+            return (proportional_total - base_alloc_sum) != 0
+
+        for buy_id, idxs in buy_indices.items():
+            buy_trade = self.audit_trades_by_id.get(buy_id)
+            if not buy_trade:
+                continue
+            qtys = [self.audit_matches[i]['matched_quantity'] for i in idxs]
+
+            if has_remainder(int(buy_trade.get('brokerage', 0) or 0), int(buy_trade.get('quantity', 0) or 0), qtys):
+                flags.setdefault(idxs[-1], []).append('BUY_BRK')
+
+            if (buy_trade.get('type1') or '').lower() == 'mtf':
+                if has_remainder(int(buy_trade.get('mtf_amount', 0) or 0), int(buy_trade.get('quantity', 0) or 0), qtys):
+                    flags.setdefault(idxs[-1], []).append('BUY_MTF')
+
+        for sell_id, idxs in sell_indices.items():
+            sell_trade = self.audit_trades_by_id.get(sell_id)
+            if not sell_trade:
+                continue
+            qtys = [self.audit_matches[i]['matched_quantity'] for i in idxs]
+            if has_remainder(int(sell_trade.get('brokerage', 0) or 0), int(sell_trade.get('quantity', 0) or 0), qtys):
+                flags.setdefault(idxs[-1], []).append('SELL_BRK')
+
+        return {idx: '|'.join(parts) for idx, parts in flags.items()}
+
+    def export_audit_csv(self) -> None:
+        """Export match-level audit details to CSV."""
+        try:
+            if not self.audit_matches:
+                messagebox.showwarning(
+                    "No Data",
+                    "No match-level data to export. Click Recalculate first."
+                )
+                return
+
+            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = config.EXPORTS_DIR / f"audit_{timestamp}.csv"
+
+            trade_ids = {m['buy_id'] for m in self.audit_matches} | {m['sell_id'] for m in self.audit_matches}
+            trade_ts_map = self._get_trade_ts_map(trade_ids)
+            remainder_flags = self._build_remainder_flag_by_match_index()
+
+            def rupees(paise: int, absolute: bool = False) -> str:
+                value = abs(paise) if absolute else paise
+                return f"{value / 100:.2f}"
+
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "SellID", "BuyID", "Equity", "Type1", "Type2", "Strike", "Expiry",
+                    "MatchedQty", "BuyDate", "BuyTS", "SellDate", "SellTS",
+                    "BuyBrokerageAutoPaise", "BuyBrokerageOverridePaise", "BuyBrokerageEffectivePaise",
+                    "SellBrokerageAutoPaise", "SellBrokerageOverridePaise", "SellBrokerageEffectivePaise",
+                    "BuyPrice", "SellPrice", "BuyCost", "SellValue",
+                    "BuyBrokerageAlloc", "SellBrokerageAlloc",
+                    "MatchedBuyTotal", "MatchedSellTotal", "GrossPnL",
+                    "MatchedMtfAmount", "HoldingDays", "MtfInterest", "NetPnL",
+                    "AllocationRemainderApplied",
+                    "BuyPricePaise", "SellPricePaise", "BuyCostPaise", "SellValuePaise",
+                    "BuyBrokerageAllocPaise", "SellBrokerageAllocPaise",
+                    "MatchedBuyTotalPaise", "MatchedSellTotalPaise", "GrossPnLPaise",
+                    "MatchedMtfAmountPaise", "MtfInterestPaise", "NetPnLPaise"
+                ])
+
+                for idx, match in enumerate(self.audit_matches):
+                    buy = self.audit_trades_by_id.get(match['buy_id'])
+                    sell = self.audit_trades_by_id.get(match['sell_id'])
+                    if not buy or not sell:
+                        continue
+
+                    buy_date = buy.get('trade_date') or ""
+                    sell_date = sell.get('trade_date') or ""
+                    buy_ts = trade_ts_map.get(match['buy_id']) or (f"{buy_date} 09:15:00" if buy_date else "")
+                    sell_ts = trade_ts_map.get(match['sell_id']) or (f"{sell_date} 09:15:00" if sell_date else "")
+
+                    gross_pnl = match.get('gross_pnl', match.get('realized_pnl', 0))
+                    net_pnl = match.get('net_pnl', gross_pnl)
+                    buy_brokerage_override = buy.get('brokerage_override')
+                    sell_brokerage_override = sell.get('brokerage_override')
+
+                    writer.writerow([
+                        match['sell_id'],
+                        match['buy_id'],
+                        sell.get('equity', ''),
+                        sell.get('type1', ''),
+                        sell.get('type2', '') or '',
+                        "" if sell.get('strike') is None else str(sell.get('strike')),
+                        sell.get('expiry', '') or '',
+                        match['matched_quantity'],
+                        buy_date,
+                        buy_ts,
+                        sell_date,
+                        sell_ts,
+                        int(buy.get('brokerage_auto', 0) or 0),
+                        "" if buy_brokerage_override is None else int(buy_brokerage_override),
+                        int(buy.get('brokerage', 0) or 0),
+                        int(sell.get('brokerage_auto', 0) or 0),
+                        "" if sell_brokerage_override is None else int(sell_brokerage_override),
+                        int(sell.get('brokerage', 0) or 0),
+                        rupees(int(buy.get('price', 0)), absolute=True),
+                        rupees(int(sell.get('price', 0)), absolute=True),
+                        rupees(match['buy_cost'], absolute=True),
+                        rupees(match['sell_value'], absolute=True),
+                        rupees(match['buy_brokerage_alloc'], absolute=True),
+                        rupees(match['sell_brokerage_alloc'], absolute=True),
+                        rupees(match.get('matched_buy_total', match['buy_cost'] + match['buy_brokerage_alloc']), absolute=True),
+                        rupees(match.get('matched_sell_total', match['sell_value'] - match['sell_brokerage_alloc']), absolute=True),
+                        rupees(gross_pnl),
+                        rupees(int(match.get('matched_mtf_amount', 0)), absolute=True),
+                        match.get('holding_days', 0),
+                        rupees(int(match.get('mtf_interest', 0)), absolute=True),
+                        rupees(net_pnl),
+                        remainder_flags.get(idx, "NONE"),
+                        int(buy.get('price', 0) or 0),
+                        int(sell.get('price', 0) or 0),
+                        int(match['buy_cost']),
+                        int(match['sell_value']),
+                        int(match['buy_brokerage_alloc']),
+                        int(match['sell_brokerage_alloc']),
+                        int(match.get('matched_buy_total', match['buy_cost'] + match['buy_brokerage_alloc'])),
+                        int(match.get('matched_sell_total', match['sell_value'] - match['sell_brokerage_alloc'])),
+                        int(gross_pnl),
+                        int(match.get('matched_mtf_amount', 0) or 0),
+                        int(match.get('mtf_interest', 0) or 0),
+                        int(net_pnl)
+                    ])
+
+            messagebox.showinfo("Export Complete", f"Audit CSV saved to:\n{filepath}")
+
+        except Exception as e:
+            logger.error(f"Audit CSV export failed: {str(e)}", exc_info=True)
+            messagebox.showerror("Export Failed", f"Failed to export audit CSV:\n{str(e)}")
 
     def export_report_csv(self) -> None:
         """Export current filtered report to CSV."""

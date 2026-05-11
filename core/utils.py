@@ -8,6 +8,7 @@ Provides common helpers used across multiple modules:
 """
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def format_money(paise: int) -> str:
@@ -124,3 +125,27 @@ def rupees_to_paise(rupees: float) -> int:
         Amount in paise as integer
     """
     return int(rupees * 100)
+
+
+def get_ist_time_str() -> str:
+    """
+    Return current time-of-day in IST as HH:MM:SS.
+    Falls back to local time if zoneinfo is unavailable.
+    """
+    try:
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    except Exception:
+        now = datetime.now()
+    return now.strftime("%H:%M:%S")
+
+
+def make_trade_ts(trade_date: str, time_str: str | None = None) -> str:
+    """
+    Build trade timestamp string using provided trade_date (YYYY-MM-DD)
+    and IST time-of-day. Keeps date deterministic and time explicit.
+    """
+    time_part = (time_str or get_ist_time_str()).strip()
+    # Normalize time part to HH:MM:SS if possible
+    if len(time_part.split(":")) == 2:
+        time_part = f"{time_part}:00"
+    return f"{trade_date} {time_part}"

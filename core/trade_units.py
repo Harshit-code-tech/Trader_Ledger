@@ -9,10 +9,9 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, TypedDict
+from typing import Any, Iterable, Mapping, TypedDict
 
 from core.fifo_matcher import TradeTuple
-from core.pnl_calculator import PnlResult
 
 
 class TradeUnit(TypedDict):
@@ -150,7 +149,7 @@ def _start_unit(contract_key: tuple[str, str, str | None, float | None, str | No
 
 def build_trade_units(
     trades: Iterable[TradeTuple],
-    match_results: Iterable[PnlResult],
+    match_results: Iterable[Mapping[str, Any]],
     *,
     grouping: str = "lifecycle"
 ) -> list[TradeUnit]:
@@ -176,11 +175,11 @@ def build_trade_units(
 
 def _build_lifecycle_units(
     trades: list[TradeTuple],
-    match_results: list[PnlResult]
+    match_results: list[Mapping[str, Any]]
 ) -> list[TradeUnit]:
-    pnl_by_sell: defaultdict[int, list[PnlResult]] = defaultdict(list)
+    pnl_by_sell: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
     for pnl in match_results:
-        pnl_by_sell[pnl['sell_id']].append(pnl)
+        pnl_by_sell[int(pnl['sell_id'])].append(pnl)
 
     trades_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list[TradeTuple]] = defaultdict(list)
     for trade in trades:
@@ -218,11 +217,11 @@ def _build_lifecycle_units(
                 current.sell_trade_ids.append(trade_id)
                 current.last_sell_date = trade_date
                 for pnl in pnl_by_sell.get(trade_id, []):
-                    current.realized_pnl += pnl['realized_pnl']
-                    current.mtf_interest += pnl.get('mtf_interest', 0)
-                    current.net_pnl += pnl.get('net_pnl', pnl['realized_pnl'])
-                    current.matched_buy_cost += pnl['buy_cost']
-                    current.matched_buy_brokerage += pnl['buy_brokerage_alloc']
+                    current.realized_pnl += int(pnl['realized_pnl'])
+                    current.mtf_interest += int(pnl.get('mtf_interest', 0))
+                    current.net_pnl += int(pnl.get('net_pnl', pnl['realized_pnl']))
+                    current.matched_buy_cost += int(pnl['buy_cost'])
+                    current.matched_buy_brokerage += int(pnl['buy_brokerage_alloc'])
 
             net_qty = current.total_buy_qty - current.total_sell_qty
             if net_qty == 0 and current.total_sell_qty > 0:
@@ -239,12 +238,12 @@ def _build_lifecycle_units(
 
 def _build_sell_units(
     trades: list[TradeTuple],
-    match_results: list[PnlResult]
+    match_results: list[Mapping[str, Any]]
 ) -> list[TradeUnit]:
     trades_by_id = {trade[0]: trade for trade in trades}
-    pnl_by_sell: defaultdict[int, list[PnlResult]] = defaultdict(list)
+    pnl_by_sell: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
     for pnl in match_results:
-        pnl_by_sell[pnl['sell_id']].append(pnl)
+        pnl_by_sell[int(pnl['sell_id'])].append(pnl)
 
     sell_keys = []
     for sell_id in pnl_by_sell:
@@ -262,18 +261,18 @@ def _build_sell_units(
         equity, type1, type2, strike, expiry = contract_key
 
         sell_matches = pnl_by_sell[sell_id]
-        total_buy_qty = sum(p['matched_quantity'] for p in sell_matches)
+        total_buy_qty = sum(int(p['matched_quantity']) for p in sell_matches)
         total_sell_qty = total_buy_qty
-        buy_cost = sum(p['buy_cost'] for p in sell_matches)
-        sell_value = sum(p['sell_value'] for p in sell_matches)
-        buy_brokerage = sum(p['buy_brokerage_alloc'] for p in sell_matches)
-        sell_brokerage = sum(p['sell_brokerage_alloc'] for p in sell_matches)
-        realized_pnl = sum(p['realized_pnl'] for p in sell_matches)
+        buy_cost = sum(int(p['buy_cost']) for p in sell_matches)
+        sell_value = sum(int(p['sell_value']) for p in sell_matches)
+        buy_brokerage = sum(int(p['buy_brokerage_alloc']) for p in sell_matches)
+        sell_brokerage = sum(int(p['sell_brokerage_alloc']) for p in sell_matches)
+        realized_pnl = sum(int(p['realized_pnl']) for p in sell_matches)
 
         avg_buy_price = float(buy_cost / total_buy_qty) if total_buy_qty else 0
         avg_sell_price = float(sell_value / total_sell_qty) if total_sell_qty else 0
 
-        buy_trade_ids = sorted({p['buy_id'] for p in sell_matches})
+        buy_trade_ids = sorted({int(p['buy_id']) for p in sell_matches})
         sell_trade_ids = [sell_id]
 
         buy_dates = [trades_by_id[bid][1] for bid in buy_trade_ids if bid in trades_by_id]
@@ -302,8 +301,8 @@ def _build_sell_units(
             total_buy_cost=buy_cost + buy_brokerage,
             total_sell_value=sell_value - sell_brokerage,
             realized_pnl=realized_pnl,
-            mtf_interest=sum(p.get('mtf_interest', 0) for p in sell_matches),
-            net_pnl=sum(p.get('net_pnl', p['realized_pnl']) for p in sell_matches),
+            mtf_interest=sum(int(p.get('mtf_interest', 0)) for p in sell_matches),
+            net_pnl=sum(int(p.get('net_pnl', p['realized_pnl'])) for p in sell_matches),
             remaining_investment=0,
             holding_days=holding_days,
             status="Closed",
@@ -315,7 +314,7 @@ def _build_sell_units(
 
     matched_qty_per_buy: defaultdict[int, int] = defaultdict(int)
     for pnl in match_results:
-        matched_qty_per_buy[pnl['buy_id']] += pnl['matched_quantity']
+        matched_qty_per_buy[int(pnl['buy_id'])] += int(pnl['matched_quantity'])
 
     open_agg: dict[tuple[str, str, str | None, float | None, str | None], UnitAccumulator] = {}
     for trade in trades:

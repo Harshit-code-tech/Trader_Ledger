@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import TypedDict
+from typing import Any, Mapping, Sequence, TypedDict
 
 
 class PnlCalculationError(Exception):
@@ -41,7 +41,7 @@ class TradeDict(TypedDict):
     is_active: int
 
 
-def aggregate_pnl_by_sell(match_results: list[PnlResult], pnl_field: str = "realized_pnl") -> dict[int, int]:
+def aggregate_pnl_by_sell(match_results: Sequence[Mapping[str, Any]], pnl_field: str = "realized_pnl") -> dict[int, int]:
     """
     Aggregates realized P/L per SELL trade.
     Input: list of match dicts (from Phase-3), each with 'sell_id' and 'realized_pnl'.
@@ -50,11 +50,11 @@ def aggregate_pnl_by_sell(match_results: list[PnlResult], pnl_field: str = "real
     sell_totals: defaultdict[int, int] = defaultdict(int)
     for match in match_results:
         assert 'sell_id' in match and pnl_field in match, "Missing required fields in match record."
-        sell_totals[match['sell_id']] += match[pnl_field]
+        sell_totals[int(match['sell_id'])] += int(match[pnl_field])
     return dict(sell_totals)
 
 def aggregate_pnl_by_date(
-    match_results: list[PnlResult],
+    match_results: Sequence[Mapping[str, Any]],
     trades_by_id: dict[int, TradeDict],
     pnl_field: str = "realized_pnl"
 ) -> dict[str, int]:
@@ -66,14 +66,14 @@ def aggregate_pnl_by_date(
     date_totals: defaultdict[str, int] = defaultdict(int)
     for match in match_results:
         assert 'sell_id' in match and pnl_field in match, "Missing required fields in match record."
-        sell_id: int = match['sell_id']
+        sell_id: int = int(match['sell_id'])
         if sell_id not in trades_by_id:
             raise PnlCalculationError(f"SELL trade_id {sell_id} not found for date aggregation")
         sell_trade: TradeDict = trades_by_id[sell_id]
         if 'trade_date' not in sell_trade:
             raise PnlCalculationError(f"SELL trade_id {sell_id} missing 'trade_date' field")
         sell_date: str = sell_trade['trade_date']
-        date_totals[sell_date] += match[pnl_field]
+        date_totals[sell_date] += int(match[pnl_field])
     return dict(date_totals)
 
 
@@ -119,7 +119,7 @@ def aggregate_pnl_by_year(month_totals: dict[str, int]) -> dict[str, int]:
 
 
 def aggregate_pnl_by_equity(
-    match_results: list[PnlResult],
+    match_results: Sequence[Mapping[str, Any]],
     trades_by_id: dict[int, TradeDict],
     pnl_field: str = "realized_pnl"
 ) -> dict[str, int]:
@@ -134,23 +134,23 @@ def aggregate_pnl_by_equity(
     equity_totals: defaultdict[str, int] = defaultdict(int)
     for match in match_results:
         assert 'sell_id' in match and pnl_field in match, "Missing required fields in match record."
-        sell_id: int = match['sell_id']
+        sell_id: int = int(match['sell_id'])
         if sell_id not in trades_by_id:
             raise PnlCalculationError(f"SELL trade_id {sell_id} not found for equity aggregation")
         sell_trade: TradeDict = trades_by_id[sell_id]
         if 'equity' not in sell_trade:
             raise PnlCalculationError(f"SELL trade_id {sell_id} missing 'equity' field")
         equity: str = sell_trade['equity']
-        equity_totals[equity] += match[pnl_field]
+        equity_totals[equity] += int(match[pnl_field])
     return dict(equity_totals)
 
 
 def filter_matches_by_date_range(
-    match_results: list[PnlResult], 
+    match_results: Sequence[Mapping[str, Any]], 
     trades_by_id: dict[int, TradeDict],
     from_date: str | None = None,
     to_date: str | None = None
-) -> list[PnlResult]:
+) -> list[dict[str, Any]]:
     """
     Filters match results by SELL trade date range.
     
@@ -175,9 +175,9 @@ def filter_matches_by_date_range(
     if from_date is None and to_date is None:
         return match_results  # No filtering needed
     
-    filtered: list[PnlResult] = []
+    filtered: list[dict[str, Any]] = []
     for match in match_results:
-        sell_id: int = match['sell_id']
+        sell_id: int = int(match['sell_id'])
         if sell_id not in trades_by_id:
             raise PnlCalculationError(f"SELL trade_id {sell_id} not found for date filtering")
         
@@ -195,13 +195,13 @@ def filter_matches_by_date_range(
             include = False
         
         if include:
-            filtered.append(match)
+            filtered.append(dict(match))
     
     return filtered
 
 
 def aggregate_trade_value_by_date(
-    match_results: list[PnlResult],
+    match_results: Sequence[Mapping[str, Any]],
     trades_by_id: dict[int, TradeDict]
 ) -> dict[str, int]:
     """
@@ -210,11 +210,11 @@ def aggregate_trade_value_by_date(
     """
     date_totals: defaultdict[str, int] = defaultdict(int)
     for match in match_results:
-        sell_id = match['sell_id']
+        sell_id = int(match['sell_id'])
         sell_trade = trades_by_id.get(sell_id)
         if not sell_trade:
             raise PnlCalculationError(f"SELL trade_id {sell_id} not found for trade value aggregation")
         sell_date = sell_trade['trade_date']
-        day_trade_value = match['buy_cost'] + match['sell_value']
+        day_trade_value = int(match['buy_cost']) + int(match['sell_value'])
         date_totals[sell_date] += day_trade_value
     return dict(date_totals)

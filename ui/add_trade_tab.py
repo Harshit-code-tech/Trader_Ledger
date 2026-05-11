@@ -23,7 +23,7 @@ import sqlite3
 from typing import Callable
 from collections import defaultdict
 from core.logger import get_logger
-from core.utils import format_money, format_money_abs
+from core.utils import format_money, format_money_abs, make_trade_ts
 from core.fifo_matcher import fetch_active_trades, match_fifo, FifoMatchError
 from core.trade_validation import normalize_trade_classification
 from core.brokerage import calculate_brokerage_auto
@@ -714,6 +714,9 @@ class AddTradeTab:
                 return False, "MTF amount must be a number"
             if mtf_amount <= 0:
                 return False, "MTF amount is required for MTF BUY trades"
+            trade_amount = quantity * int(float(self.price_entry.get()) * 100)
+            if int(mtf_amount * 100) > trade_amount:
+                return False, "MTF amount cannot exceed buy trade amount"
 
         # Validate Type1/Type2/Strike/Expiry
         try:
@@ -825,6 +828,8 @@ class AddTradeTab:
                 mtf_amount_rupees = float(self.mtf_amount_entry.get().strip() or 0)
                 mtf_amount_paise = int(mtf_amount_rupees * 100)
 
+            trade_ts = make_trade_ts(trade_date)
+
             # Insert into database
             logger.debug(f"Connecting to database: {config.DB_PATH}")
             conn = sqlite3.connect(str(config.DB_PATH))
@@ -832,13 +837,13 @@ class AddTradeTab:
             c.execute("""
                 INSERT INTO trade_events (
                     trade_date, equity, trade_type, quantity, price, brokerage,
-                    brokerage_auto, brokerage_override, mtf_amount, notes,
+                    brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
                     type1, type2, strike, expiry, is_active
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (
                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                brokerage_auto, brokerage_override, mtf_amount_paise, notes,
+                brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
                 type1, type2, strike, expiry
             ))
             trade_id = c.lastrowid
