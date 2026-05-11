@@ -49,6 +49,7 @@ class AddTradeTab:
         self.parent = parent
         self.update_status = status_callback
         self.sell_reference_meta: dict[str, dict[str, int]] = {}
+        self.equity_values: list[str] = []
         
         # Create UI
         self.create_widgets()
@@ -109,6 +110,7 @@ class AddTradeTab:
         self.equity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         self.load_equity_dropdown()
+        self.equity_entry.bind('<KeyRelease>', self._filter_equity_suggestions)
         self.equity_var.trace_add('write', lambda *_: self.update_sell_reference_fields())
         row += 1
         
@@ -403,6 +405,13 @@ class AddTradeTab:
             qty = 0
             price_paise = 0
 
+        if qty <= 0 or price_paise <= 0:
+            self.brokerage_entry.config(state='normal')
+            self.brokerage_entry.delete(0, tk.END)
+            self.brokerage_entry.insert(0, "0")
+            self.brokerage_entry.config(state='disabled')
+            return
+
         try:
             auto_brokerage, _rate_ppm = calculate_brokerage_auto(qty, price_paise, type1, trade_type)
             self.brokerage_entry.config(state='normal')
@@ -413,6 +422,11 @@ class AddTradeTab:
             # Require override when rate not configured
             self.override_brokerage_var.set(True)
             self.brokerage_entry.config(state='normal')
+            if not self.brokerage_entry.get().strip():
+                self.brokerage_entry.insert(0, "0")
+            self.update_status(
+                f"Auto brokerage not configured for {type1.upper()} {trade_type}. Enable Override to enter manually."
+            )
 
     def get_classification_inputs(self) -> tuple[str, str, str, str]:
         """Collect classification inputs with safe defaults for disabled fields."""
@@ -628,12 +642,30 @@ class AddTradeTab:
             c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
             equities = [row[0] for row in c.fetchall()]
             conn.close()
-            
+
+            self.equity_values = equities
             self.equity_entry['values'] = equities
             logger.debug(f"Loaded {len(equities)} unique equities for dropdown")
         except Exception as e:
             logger.error(f"Failed to load equities: {str(e)}")
+            self.equity_values = []
             self.equity_entry['values'] = []
+
+    def _filter_equity_suggestions(self, _event: tk.Event) -> None:
+        """Filter equity suggestions based on current input."""
+        text = self.equity_var.get().strip().upper()
+        if not self.equity_values:
+            self.equity_entry['values'] = []
+            return
+
+        if not text:
+            self.equity_entry['values'] = self.equity_values
+            return
+
+        filtered = [e for e in self.equity_values if text in e.upper()]
+        self.equity_entry['values'] = filtered
+        if filtered:
+            self.equity_entry.event_generate('<Down>')
     
     def validate_inputs(self) -> tuple[bool, str]:
         """
@@ -700,11 +732,15 @@ class AddTradeTab:
 
         # Require override when brokerage auto is not configured
         type1_norm = self.type1_var.get().strip().lower()
+        trade_type = self.trade_type_var.get().strip().upper()
         if not self.override_brokerage_var.get():
             try:
                 _auto_brokerage, _rate_ppm = calculate_brokerage_auto(quantity, int(float(self.price_entry.get()) * 100), type1_norm, trade_type)
             except Exception:
-                return False, "Brokerage rate not configured. Enable override and enter brokerage manually."
+                return False, (
+                    f"Auto brokerage not configured for {type1_norm.upper()} {trade_type}. "
+                    "Enable override and enter brokerage manually."
+                )
 
         # MTF amount validation (BUY + MTF only)
         if type1_norm == 'mtf' and self.trade_type_var.get() == 'BUY':

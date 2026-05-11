@@ -139,7 +139,7 @@ class TradeViewTab:
         self.units_tree.column('Avg Buy', width=100, anchor='e')
         self.units_tree.column('Sell Qty', width=80, anchor='e')
         self.units_tree.column('Avg Sell', width=100, anchor='e')
-        self.units_tree.column('P/L', width=100, anchor='e')
+        self.units_tree.column('Gross P/L', width=100, anchor='e')
         self.units_tree.column('MTF Interest', width=110, anchor='e')
         self.units_tree.column('Net P/L', width=110, anchor='e')
         self.units_tree.column('Holding Days', width=90, anchor='center')
