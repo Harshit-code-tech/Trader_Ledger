@@ -1,4 +1,4 @@
-# Trader Ledger v1.0 - Quick Start Guide
+# Trader Ledger v1.2 - Quick Start Guide
 
 ## For First-Time Use
 
@@ -17,6 +17,8 @@ Double-click: **`run.bat`**
 
 The application window will open.
 
+If this is your first launch, a walkthrough dialog opens automatically. You can reopen it later from the **Walkthrough** button at the top-right of the main window.
+
 ## Daily Usage
 
 Just double-click **`run.bat`** to start the application.
@@ -32,6 +34,7 @@ Just double-click **`run.bat`** to start the application.
 - Filter trades by date/stock/type
 - Edit existing trades
 - Delete trades
+- Restore deleted trades
 - **📁 Import CSV** - Import trades from CSV file
 - **💾 Export CSV** - Export filtered trades
 - **📄 Export Excel** - Export to Excel format
@@ -42,16 +45,27 @@ Just double-click **`run.bat`** to start the application.
 - View profit/loss summary
 - Daily/Weekly/Monthly/Yearly breakdowns
 - Running accumulated totals
+- Open positions with holding days
+- Total trade value and average day trade value
 - **🖨️ Print** - Generate printable HTML report
 - **🔄 Recalculate** - Refresh P/L calculations
+
+### Trade View Tab
+- Group by lifecycle or sell transaction
+- See gross P/L, MTF interest, and net P/L
+- Expand a trade unit to view audit details
+
+### Onboarding
+- First run shows a walkthrough automatically
+- Use the top-right **Walkthrough** button to open it again anytime
 
 ## CSV Import Format
 
 To import trades, create a CSV file with these columns:
 
 ```
-Date,Stock,Type,Qty,Price,Brokerage,Notes
-22-01-2026,TCS,BUY,10,350.50,10.00,Optional note
+Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
+22-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-22 09:30:00,Optional note,delivery,,,
 ```
 
 **Column Details:**
@@ -61,6 +75,9 @@ Date,Stock,Type,Qty,Price,Brokerage,Notes
 - **Qty**: Number of shares (positive integer)
 - **Price**: Price per share in rupees (e.g., 350.50)
 - **Brokerage**: Brokerage charges in rupees (optional, use 0 if none)
+- **BrokerageOverride**: Manual brokerage override in rupees when auto brokerage is not configured
+- **MtfAmount**: Required for MTF BUY trades
+- **TradeTS**: Optional IST timestamp in `YYYY-MM-DD HH:MM:SS` format
 - **Notes**: Any notes about the trade (optional)
 
 A blank template is available at: `data/sample_import.csv`
@@ -101,4 +118,4 @@ Check the log file: `logs/trader_ledger.log`
 
 ---
 
-**Version 1.0.0** - Ready for daily use
+**Version 1.2.0** - Ready for daily use

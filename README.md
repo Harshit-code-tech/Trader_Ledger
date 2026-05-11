@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1-brightgreen.svg)](docs/V1.1_FEATURES.md)
+[![Version](https://img.shields.io/badge/version-1.2-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -17,30 +17,38 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
 - 🆕 **Equity-wise Filtering (v1.1)** - Analyze P/L for individual stocks
 - 🆕 **Date Range Filtering (v1.1)** - View performance for specific time periods
-- 🆕 **Open Positions Tracking (v1.1)** - See stocks you're still holding with average prices
+- 🆕 **Open Positions Tracking (v1.1)** - See stocks you're still holding with average prices and holding days
+- 🆕 **Restore Deleted Trades (v1.2)** - Soft-deleted trades can be restored from View Records
+- 🆕 **Onboarding Walkthrough (v1.2)** - Reopen the guided walkthrough anytime from the top-right button
+- 🆕 **Stock Symbol Suggestions (v1.2)** - Type-ahead suggestions in the Add Trade tab
+- 🆕 **Auto Brokerage + MTF Interest (v1.2)** - Auto brokerage where configured, manual override where needed, and post-FIFO MTF interest support
+- 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing and timestamp auditability
 - ✅ **CSV Import/Export** - Bulk import trades and export reports in CSV or Excel format
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
 - ✅ **Offline First** - Works completely offline with all data stored locally
 - ✅ **Clean UI** - User-friendly Tkinter interface with calendar date picker and data validation
 
-## 🆕 What's New in v1.1
+## 🆕 What's New in v1.2
 
-Version 1.1 adds powerful filtering and analysis features:
+Version 1.2 adds operational and auditability improvements:
 
-1. **Filter by Stock** - Select a specific equity to see its P/L
-2. **Filter by Date Range** - Analyze performance for any time period
-3. **Open Positions** - Track what you're still holding with average buy prices
-4. **Equity-wise Summary** - See closed P/L, open P/L, and total per stock
+1. **Restore Deleted Trades** - Bring back soft-deleted records from View Records
+2. **Walkthrough Button** - Reopen the onboarding guide any time
+3. **Stock Suggestions** - Type a few characters and pick from matching symbols
+4. **Audit CSV** - Export match-level rows with brokerage, MTF, holding days, and remainder flags
 
-👉 **[Read v1.1 Quick Guide](docs/V1.1_QUICK_GUIDE.md)** for usage examples  
-👉 **[Full v1.1 Documentation](docs/V1.1_FEATURES.md)** for technical details
+5. **Holding Days** - See day-diff for both closed and open positions
+6. **Total Trade Value** - See average day trade value and total trade value in Reports
+
+👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
+👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details
 
 ## 📸 Screenshots
 
 The application includes three main tabs:
 - **Add Trade** - Record new trades with validation
 - **View Records** - Browse, filter, edit, import/export trades
-- **Reports** - Analyze profit/loss across different timeframes with v1.1 filters
+- **Reports** - Analyze profit/loss across different timeframes with filters, holdings, and trade value summaries
 
 ## 🚀 Quick Start
 
@@ -91,9 +99,9 @@ That's it! The Trader Ledger application window will open.
 2. Click **📁 Import CSV**
 3. Select your CSV file with format:
    ```csv
-   Date,Stock,Type,Qty,Price,Brokerage,Notes
-   22-01-2026,TCS,BUY,10,350.50,10.00,Initial purchase
-   23-01-2026,TCS,SELL,5,355.00,10.00,Partial exit
+   Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
+   22-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-22 09:30:00,Initial purchase,delivery,,,
+   23-01-2026,TCS,SELL,5,355.00,,12.00,0,2026-01-23 14:15:00,Partial exit,delivery,,,
    ```
 
 A sample template is available at `data/sample_import.csv`
@@ -112,6 +120,7 @@ A sample template is available at `data/sample_import.csv`
 - **Export Excel** - Export to Excel format
 - **Backup DB** - Create a timestamped backup of your database
 - **Restore DB** - Restore from a previous backup
+- **Restore Trade** - Restore a deleted trade back to active status
 
 ## 📁 Project Structure
 
@@ -168,8 +177,7 @@ The application uses a rigorous FIFO (First-In-First-Out) algorithm:
 ### Data Storage
 
 - **Database:** SQLite database at `data/trades.db`
-- **Schema:** Single `trades` table with columns:
-  - `id`, `date`, `stock`, `type`, `qty`, `price`, `brokerage`, `notes`, `timestamp`
+- **Schema:** Single `trade_events` table with trade date/time, brokerage auto/override, MTF amount, and soft-delete support
 - **Backups:** Automatic timestamped backups before imports/restores
 - **Logs:** Rotating logs at `logs/trader_ledger.log`
 
