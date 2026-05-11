@@ -43,6 +43,17 @@ class TraderLedgerApp:
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Create notebook (tabs)
+        self.toolbar = ttk.Frame(self.root)
+        self.toolbar.pack(fill='x', padx=10, pady=(10, 0))
+
+        self.walkthrough_button = ttk.Button(
+            self.toolbar,
+            text="Walkthrough",
+            command=self.show_walkthrough,
+            width=14
+        )
+        self.walkthrough_button.pack(side='right')
+
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
         
@@ -102,7 +113,21 @@ class TraderLedgerApp:
         if state_path.exists():
             return
 
+        self._show_onboarding_dialog(state_path, persist_state=True)
+
+    def show_walkthrough(self) -> None:
+        """Show the onboarding walkthrough on demand."""
+        self._show_onboarding_dialog(Path(config.ONBOARDING_STATE_FILE), persist_state=False)
+
+    def _show_onboarding_dialog(self, state_path: Path, persist_state: bool) -> None:
+        """Show walkthrough dialog, optionally persisting dismissal state."""
+        if hasattr(self, '_onboarding_dialog') and self._onboarding_dialog.winfo_exists():
+            self._onboarding_dialog.lift()
+            self._onboarding_dialog.focus_force()
+            return
+
         dialog = tk.Toplevel(self.root)
+        self._onboarding_dialog = dialog
         dialog.title("Welcome to Trader Ledger")
         dialog.transient(self.root)
         dialog.grab_set()
@@ -146,18 +171,19 @@ class TraderLedgerApp:
             next_btn.config(text='Finish' if idx == len(steps) - 1 else 'Next')
 
         def close_dialog() -> None:
-            if show_again_var.get():
-                try:
-                    state_path.write_text("seen\n", encoding='utf-8')
-                except Exception as exc:
-                    logger.warning(f"Could not persist onboarding state: {exc}")
-            else:
-                try:
-                    if state_path.exists():
-                        state_path.unlink()
-                    state_path.write_text("disabled\n", encoding='utf-8')
-                except Exception as exc:
-                    logger.warning(f"Could not persist onboarding preference: {exc}")
+            if persist_state:
+                if show_again_var.get():
+                    try:
+                        state_path.write_text("seen\n", encoding='utf-8')
+                    except Exception as exc:
+                        logger.warning(f"Could not persist onboarding state: {exc}")
+                else:
+                    try:
+                        if state_path.exists():
+                            state_path.unlink()
+                        state_path.write_text("disabled\n", encoding='utf-8')
+                    except Exception as exc:
+                        logger.warning(f"Could not persist onboarding preference: {exc}")
             dialog.destroy()
 
         def next_step() -> None:
@@ -182,3 +208,4 @@ class TraderLedgerApp:
 
         render_step()
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dialog.bind("<Destroy>", lambda _e: setattr(self, '_onboarding_dialog', None))
