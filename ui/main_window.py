@@ -6,12 +6,14 @@ Phase 1: Only Add Trade tab is functional.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
+from pathlib import Path
 from ui.add_trade_tab import AddTradeTab
 from ui.view_records_tab import ViewRecordsTab
 from ui.reports_tab import ReportsTab
 from ui.trade_view_tab import TradeViewTab
 from core.logger import get_logger
+import config
 
 logger = get_logger('ui.main_window')
 
@@ -49,6 +51,7 @@ class TraderLedgerApp:
         
         # Create tabs
         self.create_tabs()
+        self.root.after(400, self.show_onboarding_if_needed)
         logger.info("Main window initialized successfully")
     
     def create_tabs(self) -> None:
@@ -92,3 +95,90 @@ class TraderLedgerApp:
         logger.debug(f"Status update: {message}")
         self.status_bar.config(text=message)
         self.root.update_idletasks()
+
+    def show_onboarding_if_needed(self) -> None:
+        """Show first-run walkthrough unless user has dismissed it."""
+        state_path = Path(config.ONBOARDING_STATE_FILE)
+        if state_path.exists():
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Welcome to Trader Ledger")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.geometry("620x380")
+
+        steps = [
+            ("Add Trade", "Enter BUY or SELL trades, choose the stock symbol, and the app fills brokerage automatically when supported."),
+            ("View Records", "Review all trades, restore deleted rows, and filter by stock, type, or date."),
+            ("Reports", "See realized P/L, holding days, open positions, and trade value summaries."),
+            ("Trade View", "Get grouped, human-friendly trade units with gross/net P/L and audit details."),
+        ]
+
+        index_var = tk.IntVar(value=0)
+        show_again_var = tk.BooleanVar(value=True)
+
+        container = ttk.Frame(dialog, padding=20)
+        container.pack(fill='both', expand=True)
+
+        title_label = ttk.Label(container, text="Welcome", font=('Consolas', 16, 'bold'))
+        title_label.pack(anchor='w')
+
+        step_title = ttk.Label(container, text="", font=('Consolas', 12, 'bold'))
+        step_title.pack(anchor='w', pady=(14, 4))
+
+        step_text = ttk.Label(container, text="", wraplength=560, justify='left', font=('Arial', 10))
+        step_text.pack(anchor='w', pady=(0, 16))
+
+        footer_frame = ttk.Frame(container)
+        footer_frame.pack(fill='x', side='bottom')
+
+        show_again = ttk.Checkbutton(footer_frame, text="Show this walkthrough on startup", variable=show_again_var)
+        show_again.pack(side='left')
+
+        def render_step() -> None:
+            idx = index_var.get()
+            title, text = steps[idx]
+            step_title.config(text=f"Step {idx + 1} of {len(steps)}: {title}")
+            step_text.config(text=text)
+            back_btn.config(state='normal' if idx > 0 else 'disabled')
+            next_btn.config(text='Finish' if idx == len(steps) - 1 else 'Next')
+
+        def close_dialog() -> None:
+            if show_again_var.get():
+                try:
+                    state_path.write_text("seen\n", encoding='utf-8')
+                except Exception as exc:
+                    logger.warning(f"Could not persist onboarding state: {exc}")
+            else:
+                try:
+                    if state_path.exists():
+                        state_path.unlink()
+                    state_path.write_text("disabled\n", encoding='utf-8')
+                except Exception as exc:
+                    logger.warning(f"Could not persist onboarding preference: {exc}")
+            dialog.destroy()
+
+        def next_step() -> None:
+            if index_var.get() >= len(steps) - 1:
+                close_dialog()
+                return
+            index_var.set(index_var.get() + 1)
+            render_step()
+
+        def prev_step() -> None:
+            if index_var.get() > 0:
+                index_var.set(index_var.get() - 1)
+                render_step()
+
+        button_frame = ttk.Frame(footer_frame)
+        button_frame.pack(side='right')
+
+        back_btn = ttk.Button(button_frame, text="Back", command=prev_step, width=10)
+        back_btn.pack(side='left', padx=(0, 8))
+        next_btn = ttk.Button(button_frame, text="Next", command=next_step, width=10)
+        next_btn.pack(side='left')
+
+        render_step()
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)

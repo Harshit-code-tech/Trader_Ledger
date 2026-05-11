@@ -16,6 +16,7 @@ This is computed dynamically to avoid state bugs.
 """
 
 from typing import TypedDict
+from datetime import datetime, date
 from collections import defaultdict
 
 
@@ -60,6 +61,7 @@ class OpenPosition(TypedDict):
     avg_price: float  # In rupees (price/100)
     total_cost: int  # In paise
     unrealized_pnl: int  # In paise (will be 0 for now, needs market price)
+    holding_days: int  # Calendar days since first buy
 
 
 def calculate_open_positions(
@@ -123,6 +125,11 @@ def calculate_open_positions(
             (p['brokerage'] * p['remaining_qty']) // trades_by_id[p['trade_id']]['quantity']
             for p in positions
         )
+
+        first_buy_date = min(p['trade_date'] for p in positions)
+        holding_days = (date.today() - datetime.strptime(first_buy_date, "%Y-%m-%d").date()).days
+        if holding_days < 0:
+            holding_days = 0
         
         # Calculate average price (in rupees)
         avg_price_paise = total_cost / total_qty if total_qty > 0 else 0
@@ -146,7 +153,8 @@ def calculate_open_positions(
             remaining_qty=total_qty,
             avg_price=round(avg_price_rupees, 2),
             total_cost=total_cost,
-            unrealized_pnl=unrealized_pnl
+            unrealized_pnl=unrealized_pnl,
+            holding_days=holding_days
         ))
     
     # Sort by equity name

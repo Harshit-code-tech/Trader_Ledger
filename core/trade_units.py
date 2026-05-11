@@ -362,6 +362,8 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
     holding_days = 0
     if unit.first_buy_date and unit.last_sell_date:
         holding_days = (_parse_date(unit.last_sell_date) - _parse_date(unit.first_buy_date)).days
+    elif unit.first_buy_date and status == "Open":
+        holding_days = (datetime.today().date() - _parse_date(unit.first_buy_date).date()).days
 
     remaining_qty = max(unit.total_buy_qty - unit.total_sell_qty, 0)
     remaining_investment = 0

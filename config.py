@@ -39,6 +39,7 @@ BASE_DIR = Path(__file__).parent if not getattr(sys, 'frozen', False) else Path(
 DATA_DIR = get_data_directory()
 LOGS_DIR = DATA_DIR / "logs"
 EXPORTS_DIR = DATA_DIR / "exports"
+ONBOARDING_STATE_FILE = DATA_DIR / "onboarding_seen.txt"
 
 # Database
 DB_PATH = DATA_DIR / "trades.db"

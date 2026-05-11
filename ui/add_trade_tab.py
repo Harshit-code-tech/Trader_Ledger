@@ -654,6 +654,7 @@ class AddTradeTab:
     def _filter_equity_suggestions(self, _event: tk.Event) -> None:
         """Filter equity suggestions based on current input."""
         text = self.equity_var.get().strip().upper()
+        cursor_pos = self.equity_entry.index(tk.INSERT)
         if not self.equity_values:
             self.equity_entry['values'] = []
             return
@@ -664,8 +665,8 @@ class AddTradeTab:
 
         filtered = [e for e in self.equity_values if text in e.upper()]
         self.equity_entry['values'] = filtered
-        if filtered:
-            self.equity_entry.event_generate('<Down>')
+        self.equity_entry.focus_set()
+        self.equity_entry.icursor(cursor_pos)
     
     def validate_inputs(self) -> tuple[bool, str]:
         """

@@ -278,6 +278,13 @@ class ViewRecordsTab:
             command=self.delete_selected_trade,
             width=15
         ).pack(side='left', padx=5)
+
+        ttk.Button(
+            button_frame,
+            text="Restore Trade",
+            command=self.restore_selected_trade,
+            width=15
+        ).pack(side='left', padx=5)
         
         # Separator
         ttk.Separator(button_frame, orient='vertical').pack(side='left', fill='y', padx=10)
@@ -698,6 +705,55 @@ class ViewRecordsTab:
             logger.error(f"Failed to delete trade: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to delete trade:\n{str(e)}")
             self.update_status("❌ Error deleting trade")
+
+    def restore_selected_trade(self) -> None:
+        """Restore a soft-deleted trade (set is_active = 1)."""
+        selection = self.records_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a deleted trade to restore")
+            return
+
+        item = self.records_tree.item(selection[0])
+        values = item.get('values', ())
+        if len(values) < 13:
+            messagebox.showwarning("Invalid Selection", "Please select a trade row to restore")
+            return
+
+        trade_id = values[0]
+        status = values[12]
+        trade_info = f"{values[3]} {values[8]} {values[2]} on {values[1]}"
+
+        if status != "Deleted":
+            messagebox.showinfo("Already Active", "This trade is already active.")
+            return
+
+        result = messagebox.askyesno(
+            "Confirm Restore",
+            f"Are you sure you want to restore this trade?\n\n{trade_info}\n\nThis will set is_active = 1."
+        )
+
+        if not result:
+            logger.info(f"Restore cancelled by user for trade ID: {trade_id}")
+            return
+
+        try:
+            logger.info(f"Restoring trade ID: {trade_id}")
+            conn = sqlite3.connect(str(config.DB_PATH))
+            c = conn.cursor()
+            c.execute("UPDATE trade_events SET is_active = 1 WHERE id = ?", (trade_id,))
+            conn.commit()
+            conn.close()
+
+            logger.info(f"✅ Trade ID {trade_id} restored successfully")
+            self.update_status(f"✅ Trade restored: {trade_info}")
+            messagebox.showinfo("Success", "Trade restored successfully")
+
+            self.refresh_records()
+
+        except Exception as e:
+            logger.error(f"Failed to restore trade: {str(e)}", exc_info=True)
+            messagebox.showerror("Error", f"Failed to restore trade:\n{str(e)}")
+            self.update_status("❌ Error restoring trade")
     
     def on_double_click(self, event: tk.Event) -> None:  # type: ignore
         """Handle double-click for inline editing."""

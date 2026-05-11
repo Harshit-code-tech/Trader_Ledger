@@ -442,7 +442,7 @@ class ReportsTab:
         def _on_equity_mouse_down(event: tk.Event) -> None:  # type: ignore
             lb = event.widget
             idx = lb.nearest(event.y)
-            lb.selection_clear()
+            lb.selection_clear(0, tk.END)
             lb.selection_set(idx)
             lb._anchor = idx
 
@@ -455,7 +455,7 @@ class ReportsTab:
             idx = lb.nearest(event.y)
             low = min(anchor, idx)
             high = max(anchor, idx)
-            lb.selection_clear()
+            lb.selection_clear(0, tk.END)
             lb.selection_set(low, high)
 
         self.equity_listbox.bind('<Button-1>', _on_equity_mouse_down)
@@ -1220,7 +1220,7 @@ class ReportsTab:
         if hasattr(self, 'open_tree') and self.show_open_positions_var.get():
             for item_id in self.open_tree.get_children():
                 values = self.open_tree.item(item_id, 'values')
-                if len(values) >= 9:
+                if len(values) >= 10:
                     data['open_positions'].append(values)
 
         return data
@@ -1456,7 +1456,7 @@ class ReportsTab:
                     writer.writerow(["Open Positions"])
                     writer.writerow([
                         "Equity", "Type1", "Type2", "Strike", "Expiry",
-                        "Status", "Qty", "Avg Price", "Unrealized P/L"
+                        "Holding Days", "Status", "Qty", "Avg Price", "Unrealized P/L"
                     ])
                     for row in data['open_positions']:
                         writer.writerow(row)
@@ -1536,7 +1536,7 @@ class ReportsTab:
                 ws_open = wb.create_sheet(title="Open Positions")
                 ws_open.append([
                     "Equity", "Type1", "Type2", "Strike", "Expiry",
-                    "Status", "Qty", "Avg Price", "Unrealized P/L"
+                    "Holding Days", "Status", "Qty", "Avg Price", "Unrealized P/L"
                 ])
                 for cell in ws_open[1]:
                     cell.font = bold
@@ -1700,7 +1700,7 @@ class ReportsTab:
 
             columns = (
                 'Equity', 'Type1', 'Type2', 'Strike', 'Expiry',
-                'Status', 'Qty', 'Avg Price', 'Unrealized P/L'
+                'Holding Days', 'Status', 'Qty', 'Avg Price', 'Unrealized P/L'
             )
             self.open_tree = ttk.Treeview(
                 table_frame,
@@ -1716,6 +1716,7 @@ class ReportsTab:
             self.open_tree.heading('Type2', text='Type2', anchor='center')
             self.open_tree.heading('Strike', text='Strike', anchor='e')
             self.open_tree.heading('Expiry', text='Expiry', anchor='center')
+            self.open_tree.heading('Holding Days', text='Holding Days', anchor='center')
             self.open_tree.heading('Status', text='Status', anchor='center')
             self.open_tree.heading('Qty', text='Quantity', anchor='e')
             self.open_tree.heading('Avg Price', text='Avg Price (₹)', anchor='e')
@@ -1726,6 +1727,7 @@ class ReportsTab:
             self.open_tree.column('Type2', width=60, anchor='center')
             self.open_tree.column('Strike', width=80, anchor='e')
             self.open_tree.column('Expiry', width=100, anchor='center')
+            self.open_tree.column('Holding Days', width=110, anchor='center')
             self.open_tree.column('Status', width=80, anchor='center')
             self.open_tree.column('Qty', width=100, anchor='e')
             self.open_tree.column('Avg Price', width=120, anchor='e')
@@ -1767,6 +1769,7 @@ class ReportsTab:
                 "",
                 "",
                 "",
+                "",
                 ""
             ), tags=('empty',))
             self.open_tree.tag_configure('empty', foreground='gray')
@@ -1784,6 +1787,7 @@ class ReportsTab:
             if pos.get('expiry'):
                 year_e, month_e, day_e = pos['expiry'].split('-')
                 expiry_display = f"{day_e}-{month_e}-{year_e}"
+            holding_display = str(pos.get('holding_days', 0))
 
             self.open_tree.insert('', 'end', values=(
                 pos['equity'],
@@ -1791,6 +1795,7 @@ class ReportsTab:
                 type2_display,
                 strike_display,
                 expiry_display,
+                holding_display,
                 pos['status'],
                 f"{pos['remaining_qty']:,}",
                 f"₹ {pos['avg_price']:.2f}",
