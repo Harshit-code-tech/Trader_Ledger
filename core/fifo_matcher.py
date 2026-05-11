@@ -2,6 +2,7 @@ import sqlite3
 from typing import TypedDict
 import config
 from core.trade_validation import normalize_trade_classification
+from core.brokerage import get_effective_brokerage
 
 DB_PATH = str(config.DB_PATH)
 
@@ -24,8 +25,9 @@ class MatchRecord(TypedDict):
 
 
 # Trade tuple from DB:
-# (id, trade_date, equity, trade_type, type1, type2, strike, expiry, quantity, price, brokerage, notes, is_active)
-TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None, int, int, int, str, int]
+# (id, trade_date, equity, trade_type, type1, type2, strike, expiry, quantity, price,
+#  brokerage_effective, notes, is_active, brokerage_auto, brokerage_override, mtf_amount)
+TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None, int, int, int, str, int, int, int | None, int]
 ContractKey = tuple[str, str, str | None, float | None, str | None]
 
 
@@ -33,8 +35,9 @@ def fetch_active_trades() -> list[TradeTuple]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-               quantity, price, brokerage, notes, is_active
+         SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+             quantity, price, brokerage, notes, is_active,
+             brokerage_auto, brokerage_override, mtf_amount
         FROM trade_events
         WHERE is_active = 1
         ORDER BY trade_date, id
@@ -47,7 +50,7 @@ def fetch_active_trades() -> list[TradeTuple]:
     
     for trade in trades:
         (trade_id, trade_date, equity, trade_type, type1_raw, type2_raw, strike_raw, expiry_raw,
-         quantity, price, brokerage, notes, is_active) = trade
+         quantity, price, brokerage, notes, is_active, brokerage_auto, brokerage_override, mtf_amount) = trade
         
         # Normalize equity (strip whitespace and uppercase)
         equity = equity.strip().upper()
@@ -147,10 +150,19 @@ def fetch_active_trades() -> list[TradeTuple]:
                 f"{'='*60}"
             ) from exc
 
+        effective_brokerage = get_effective_brokerage({
+            'brokerage': brokerage,
+            'brokerage_auto': brokerage_auto,
+            'brokerage_override': brokerage_override
+        })
+
+        mtf_amount = int(mtf_amount or 0)
+
         # Add normalized trade to list
         normalized_trades.append(
             (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-             quantity, price, brokerage, notes, is_active)
+             quantity, price, effective_brokerage, notes, is_active, int(brokerage_auto or 0),
+             int(brokerage_override) if brokerage_override is not None else None, mtf_amount)
         )
     
     return normalized_trades
@@ -168,7 +180,7 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
     
     for trade in trades:
         (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-         quantity, _price, _brokerage, _notes, _is_active) = trade
+         quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
         
         # Validate equity field
         if not equity or equity.strip() == '':

@@ -42,6 +42,9 @@ class TradeDict(TypedDict):
     quantity: int
     price: int
     brokerage: int
+    brokerage_auto: int
+    brokerage_override: int | None
+    mtf_amount: int
     notes: str
     is_active: int
 

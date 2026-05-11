@@ -30,13 +30,14 @@ def test_v1_1_features():
     
     # Sample trades (all values in paise)
     trades: list[TradeTuple] = [
-        # (id, date, equity, type, type1, type2, strike, expiry, qty, price, brokerage, notes, is_active)
-        (1, '2026-01-10', 'TCS', 'BUY', 'delivery', None, None, None, 100, 342100, 50, '', 1),      # Buy 100 TCS @ 3421
-        (2, '2026-01-12', 'INFY', 'BUY', 'delivery', None, None, None, 50, 150000, 30, '', 1),      # Buy 50 INFY @ 1500
-        (3, '2026-01-15', 'TCS', 'SELL', 'delivery', None, None, None, 60, 345000, 40, '', 1),      # Sell 60 TCS @ 3450
-        (4, '2026-01-18', 'INFY', 'BUY', 'delivery', None, None, None, 30, 151000, 20, '', 1),      # Buy 30 INFY @ 1510
-        (5, '2026-01-20', 'INFY', 'SELL', 'delivery', None, None, None, 40, 152000, 25, '', 1),     # Sell 40 INFY @ 1520
-        (6, '2026-01-22', 'TCS', 'SELL', 'delivery', None, None, None, 20, 350000, 15, '', 1),      # Sell 20 TCS @ 3500
+        # (id, date, equity, type, type1, type2, strike, expiry, qty, price, brokerage,
+        #  notes, is_active, brokerage_auto, brokerage_override, mtf_amount)
+        (1, '2026-01-10', 'TCS', 'BUY', 'delivery', None, None, None, 100, 342100, 50, '', 1, 50, None, 0),
+        (2, '2026-01-12', 'INFY', 'BUY', 'delivery', None, None, None, 50, 150000, 30, '', 1, 30, None, 0),
+        (3, '2026-01-15', 'TCS', 'SELL', 'delivery', None, None, None, 60, 345000, 40, '', 1, 40, None, 0),
+        (4, '2026-01-18', 'INFY', 'BUY', 'delivery', None, None, None, 30, 151000, 20, '', 1, 20, None, 0),
+        (5, '2026-01-20', 'INFY', 'SELL', 'delivery', None, None, None, 40, 152000, 25, '', 1, 25, None, 0),
+        (6, '2026-01-22', 'TCS', 'SELL', 'delivery', None, None, None, 20, 350000, 15, '', 1, 15, None, 0),
     ]
     
     print("\n1️⃣ Testing FIFO Matching")

@@ -1,5 +1,8 @@
 from typing import TypedDict
 
+from core.allocations import allocate_proportional_amount, AllocationError
+from core.brokerage import get_effective_brokerage
+
 
 class PnlCalculationError(Exception):
     pass
@@ -17,6 +20,9 @@ class TradeDict(TypedDict):
     quantity: int
     price: int
     brokerage: int
+    brokerage_auto: int
+    brokerage_override: int | None
+    mtf_amount: int
     notes: str
     is_active: int
 
@@ -37,45 +43,33 @@ class PnlResult(TypedDict):
     buy_brokerage_alloc: int
     sell_brokerage_alloc: int
     realized_pnl: int
+    matched_buy_total: int
+    matched_sell_total: int
+    gross_pnl: int
 
 
-def allocate_brokerage(total_brokerage: int, total_quantity: int, match_quantities: list[int]) -> list[int]:
+def allocate_brokerage(total_brokerage: int, trade_quantity: int, match_quantities: list[int]) -> list[int]:
     """
-    Allocate total_brokerage (int, paise) across match_quantities (list of int),
-    using explicit proportional allocation:
-        allocation = (total_brokerage * qty) // total_quantity
-    Any remainder paise is assigned to the last match (FIFO order).
-    Asserts sum(match_quantities) == total_quantity.
-    Returns a list of allocated brokerage (int, paise) for each match.
+    Allocate brokerage proportionally to matched quantities.
+    For partial sells, only the matched portion consumes brokerage.
+    Remainder stays with any open quantity.
     """
     match_sum = sum(match_quantities)
-    if match_sum != total_quantity:
+    if match_sum > trade_quantity:
         raise PnlCalculationError(
             f"\n{'='*60}\n"
             f"BROKERAGE ALLOCATION ERROR\n"
             f"{'='*60}\n"
             f"Sum of match quantities: {match_sum}\n"
-            f"Expected trade quantity: {total_quantity}\n"
-            f"Difference: {abs(match_sum - total_quantity)}\n"
-            f"\n💡 This indicates a mismatch in FIFO matching logic.\n"
-            f"The matched quantities don't add up to the trade quantity.\n"
+            f"Trade quantity: {trade_quantity}\n"
+            f"\n💡 Matched quantities cannot exceed trade quantity.\n"
             f"{'='*60}"
         )
-    
-    if total_quantity <= 0:
-        raise PnlCalculationError(
-            f"Invalid trade quantity: {total_quantity}. Quantity must be positive."
-        )
-    
-    allocations: list[int] = [
-        (total_brokerage * qty) // total_quantity
-        for qty in match_quantities
-    ]
-    allocated: int = sum(allocations)
-    remainder: int = total_brokerage - allocated
-    if allocations:
-        allocations[-1] += remainder  # Assign remainder to last match (FIFO order)
-    return allocations
+    try:
+        allocations, _ = allocate_proportional_amount(total_brokerage, trade_quantity, match_quantities)
+        return allocations
+    except AllocationError as exc:
+        raise PnlCalculationError(str(exc)) from exc
 
 def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, TradeDict]) -> list[PnlResult]:
     """
@@ -122,12 +116,14 @@ def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, Trad
     buy_brokerage_allocs: dict[int, list[int]] = {}
     for buy_id, qtys in buy_matches.items():
         trade: TradeDict = trades_by_id[buy_id]
-        allocs: list[int] = allocate_brokerage(trade['brokerage'], sum(qtys), qtys)  # Only allocate to matched portion
+        effective_brokerage = get_effective_brokerage(trade)
+        allocs: list[int] = allocate_brokerage(effective_brokerage, trade['quantity'], qtys)
         buy_brokerage_allocs[buy_id] = allocs
     sell_brokerage_allocs: dict[int, list[int]] = {}
     for sell_id, qtys in sell_matches.items():
         trade: TradeDict = trades_by_id[sell_id]
-        allocs: list[int] = allocate_brokerage(trade['brokerage'], trade['quantity'], qtys)  # Allocate full SELL brokerage
+        effective_brokerage = get_effective_brokerage(trade)
+        allocs: list[int] = allocate_brokerage(effective_brokerage, trade['quantity'], qtys)
         sell_brokerage_allocs[sell_id] = allocs
     # Now build per-match P&L
     buy_alloc_idx: defaultdict[int, int] = defaultdict(int)
@@ -146,7 +142,9 @@ def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, Trad
         sell_alloc: int = sell_brokerage_allocs[sell_id][sell_alloc_idx[sell_id]]
         buy_alloc_idx[buy_id] += 1
         sell_alloc_idx[sell_id] += 1
-        realized_pnl: int = sell_value - buy_cost - buy_alloc - sell_alloc
+        matched_buy_total = buy_cost + buy_alloc
+        matched_sell_total = sell_value - sell_alloc
+        realized_pnl: int = matched_sell_total - matched_buy_total
         results.append(PnlResult(
             sell_id=sell_id,
             buy_id=buy_id,
@@ -155,7 +153,10 @@ def calculate_match_pnl(matches: list[MatchRecord], trades_by_id: dict[int, Trad
             sell_value=sell_value,
             buy_brokerage_alloc=buy_alloc,
             sell_brokerage_alloc=sell_alloc,
-            realized_pnl=realized_pnl
+            realized_pnl=realized_pnl,
+            matched_buy_total=matched_buy_total,
+            matched_sell_total=matched_sell_total,
+            gross_pnl=realized_pnl
         ))
     return results
 
@@ -183,12 +184,14 @@ if __name__ == '__main__':
         1: TradeDict(
             id=1, trade_date='2026-01-15', equity='TCS', trade_type='BUY',
             type1='delivery', type2=None, strike=None, expiry=None,
-            quantity=10, price=1000, brokerage=10, notes='', is_active=1
+            quantity=10, price=1000, brokerage=10, brokerage_auto=10, brokerage_override=None,
+            mtf_amount=0, notes='', is_active=1
         ),
         2: TradeDict(
             id=2, trade_date='2026-01-15', equity='TCS', trade_type='SELL',
             type1='delivery', type2=None, strike=None, expiry=None,
-            quantity=6, price=1200, brokerage=6, notes='', is_active=1
+            quantity=6, price=1200, brokerage=6, brokerage_auto=6, brokerage_override=None,
+            mtf_amount=0, notes='', is_active=1
         ),
     }
     # SELL 2 matches BUY 1 in two lots: 4 and 2

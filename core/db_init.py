@@ -44,6 +44,9 @@ def init_database(db_path: str | None = None) -> bool:
                 quantity INTEGER NOT NULL CHECK (quantity > 0),
                 price NUMERIC NOT NULL CHECK (price > 0),
                 brokerage NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage >= 0),
+                brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0),
+                brokerage_override NUMERIC CHECK (brokerage_override >= 0),
+                mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0),
                 notes TEXT,
                 type1 TEXT CHECK (type1 IN ("intraday", "delivery", "mtf", "futures", "options") OR type1 IS NULL),
                 type2 TEXT CHECK (type2 IN ("CE", "PE") OR type2 IS NULL),
@@ -60,7 +63,10 @@ def init_database(db_path: str | None = None) -> bool:
             "type1": "type1 TEXT CHECK (type1 IN (\"intraday\", \"delivery\", \"mtf\", \"futures\", \"options\") OR type1 IS NULL)",
             "type2": "type2 TEXT CHECK (type2 IN (\"CE\", \"PE\") OR type2 IS NULL)",
             "strike": "strike REAL CHECK (strike > 0 OR strike IS NULL)",
-            "expiry": "expiry DATE"
+            "expiry": "expiry DATE",
+            "brokerage_auto": "brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0)",
+            "brokerage_override": "brokerage_override NUMERIC CHECK (brokerage_override >= 0)",
+            "mtf_amount": "mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0)"
         }
         for column_name, column_def in columns_to_add.items():
             if column_name not in existing_columns:

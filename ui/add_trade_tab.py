@@ -26,6 +26,7 @@ from core.logger import get_logger
 from core.utils import format_money, format_money_abs
 from core.fifo_matcher import fetch_active_trades, match_fifo, FifoMatchError
 from core.trade_validation import normalize_trade_classification
+from core.brokerage import calculate_brokerage_auto
 import config
 
 logger = get_logger('ui.add_trade_tab')
@@ -218,7 +219,7 @@ class AddTradeTab:
         self.quantity_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.quantity_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(shares)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
-        self.quantity_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
+        self.quantity_entry.bind('<KeyRelease>', lambda _e: (self.update_brokerage_state(), self.update_price_preview()))
         row += 1
         
         # Price
@@ -226,14 +227,24 @@ class AddTradeTab:
         self.price_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
         self.price_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Label(main_frame, text="(₹ per share)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
-        self.price_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
+        self.price_entry.bind('<KeyRelease>', lambda _e: (self.update_brokerage_state(), self.update_price_preview()))
         row += 1
         
         # Brokerage
         ttk.Label(main_frame, text="Brokerage:", font=('Consolas', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.brokerage_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
-        self.brokerage_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        brokerage_frame = ttk.Frame(main_frame)
+        brokerage_frame.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.brokerage_entry = ttk.Entry(brokerage_frame, width=12, font=('Consolas', 10))
+        self.brokerage_entry.pack(side='left')
         self.brokerage_entry.insert(0, "0")  # Default to 0
+        self.override_brokerage_var = tk.BooleanVar(value=False)
+        self.override_brokerage_check = ttk.Checkbutton(
+            brokerage_frame,
+            text="Override",
+            variable=self.override_brokerage_var,
+            command=self.update_brokerage_state
+        )
+        self.override_brokerage_check.pack(side='left', padx=(8, 0))
         ttk.Label(main_frame, text="(₹)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         self.brokerage_entry.bind('<KeyRelease>', lambda _e: self.update_price_preview())
         row += 1
@@ -241,6 +252,15 @@ class AddTradeTab:
         # Real-time P/L preview (updates when SELL reference, qty, price or brokerage change)
         self.pnl_preview_label = ttk.Label(main_frame, text="", font=('Consolas', 10), foreground='#34495e')
         self.pnl_preview_label.grid(row=row, column=1, sticky='w', padx=5, pady=(0, 8))
+        row += 1
+
+        # MTF amount (BUY only, MTF type)
+        self.mtf_amount_label = ttk.Label(main_frame, text="MTF Amount:", font=('Consolas', 10))
+        self.mtf_amount_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.mtf_amount_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
+        self.mtf_amount_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.mtf_amount_hint = ttk.Label(main_frame, text="(₹, BUY only for MTF)", font=('Consolas', 9), foreground='gray')
+        self.mtf_amount_hint.grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
         # Notes
@@ -333,6 +353,9 @@ class AddTradeTab:
             self.strike_entry.delete(0, tk.END)
             self.expiry_entry.delete(0, tk.END)
             hide_all_derivative_fields()
+
+        self._update_mtf_amount_visibility()
+        self.update_brokerage_state()
         self.update_sell_reference_fields()
 
     def update_sell_reference_fields(self) -> None:
@@ -342,12 +365,54 @@ class AddTradeTab:
             self.sell_ref_entry.grid_remove()
             self.sell_ref_hint.grid_remove()
             self.sell_ref_var.set('')
+            self._update_mtf_amount_visibility()
             return
 
         self.sell_ref_label.grid()
         self.sell_ref_entry.grid()
         self.sell_ref_hint.grid()
         self.load_sell_reference_options()
+        self.update_brokerage_state()
+        self._update_mtf_amount_visibility()
+
+    def _update_mtf_amount_visibility(self) -> None:
+        type1 = self.type1_var.get().strip().lower()
+        is_mtf_buy = type1 == 'mtf' and self.trade_type_var.get() == 'BUY'
+        if is_mtf_buy:
+            self.mtf_amount_label.grid()
+            self.mtf_amount_entry.grid()
+            self.mtf_amount_hint.grid()
+        else:
+            self.mtf_amount_label.grid_remove()
+            self.mtf_amount_entry.grid_remove()
+            self.mtf_amount_hint.grid_remove()
+
+    def update_brokerage_state(self) -> None:
+        """Update brokerage field based on override and configured rates."""
+        type1 = self.type1_var.get().strip().lower()
+        trade_type = self.trade_type_var.get().strip().upper()
+
+        if self.override_brokerage_var.get():
+            self.brokerage_entry.config(state='normal')
+            return
+
+        try:
+            qty = int(self.quantity_entry.get().strip() or 0)
+            price_paise = int(float(self.price_entry.get().strip() or 0) * 100)
+        except Exception:
+            qty = 0
+            price_paise = 0
+
+        try:
+            auto_brokerage, _rate_ppm = calculate_brokerage_auto(qty, price_paise, type1, trade_type)
+            self.brokerage_entry.config(state='normal')
+            self.brokerage_entry.delete(0, tk.END)
+            self.brokerage_entry.insert(0, f"{auto_brokerage / 100:.2f}")
+            self.brokerage_entry.config(state='disabled')
+        except Exception:
+            # Require override when rate not configured
+            self.override_brokerage_var.set(True)
+            self.brokerage_entry.config(state='normal')
 
     def get_classification_inputs(self) -> tuple[str, str, str, str]:
         """Collect classification inputs with safe defaults for disabled fields."""
@@ -402,7 +467,8 @@ class AddTradeTab:
         options: list[tuple[str, str]] = []
         for trade in trades:
             (trade_id, trade_date, trade_equity, trade_type, trade_type1,
-             trade_type2, trade_strike, trade_expiry, quantity, price_paise, _brokerage, _notes, _is_active) = trade
+             trade_type2, trade_strike, trade_expiry, quantity, price_paise,
+             _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
 
             if trade_type != 'BUY':
                 continue
@@ -632,6 +698,23 @@ class AddTradeTab:
             logger.warning(f"Validation failed: Brokerage is not a number - {str(e)}")
             return False, "Brokerage must be a number"
 
+        # Require override when brokerage auto is not configured
+        type1_norm = self.type1_var.get().strip().lower()
+        if not self.override_brokerage_var.get():
+            try:
+                _auto_brokerage, _rate_ppm = calculate_brokerage_auto(quantity, int(float(self.price_entry.get()) * 100), type1_norm, trade_type)
+            except Exception:
+                return False, "Brokerage rate not configured. Enable override and enter brokerage manually."
+
+        # MTF amount validation (BUY + MTF only)
+        if type1_norm == 'mtf' and self.trade_type_var.get() == 'BUY':
+            try:
+                mtf_amount = float(self.mtf_amount_entry.get().strip() or 0)
+            except ValueError:
+                return False, "MTF amount must be a number"
+            if mtf_amount <= 0:
+                return False, "MTF amount is required for MTF BUY trades"
+
         # Validate Type1/Type2/Strike/Expiry
         try:
             type1, type2, strike, expiry = self.get_classification_inputs()
@@ -699,9 +782,17 @@ class AddTradeTab:
             # Convert ₹ → paise
             price_rupees = float(self.price_entry.get())
             price_paise = int(price_rupees * 100)
-            
-            brokerage_rupees = float(self.brokerage_entry.get())
-            brokerage_paise = int(brokerage_rupees * 100)
+
+            type1_norm = self.type1_var.get().strip().lower()
+            if self.override_brokerage_var.get():
+                brokerage_rupees = float(self.brokerage_entry.get())
+                brokerage_paise = int(brokerage_rupees * 100)
+                brokerage_auto = 0
+                brokerage_override = brokerage_paise
+            else:
+                brokerage_paise, _rate_ppm = calculate_brokerage_auto(quantity, price_paise, type1_norm, trade_type)
+                brokerage_auto = brokerage_paise
+                brokerage_override = None
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
 
@@ -729,18 +820,25 @@ class AddTradeTab:
             logger.info(f"Preparing to save trade: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f} on {date_str}")
             logger.debug(f"Trade details - Date: {trade_date}, Equity: {equity}, Type: {trade_type}, Qty: {quantity}, Price: {price_paise} paise, Brokerage: {brokerage_paise} paise")
             
+            mtf_amount_paise = 0
+            if type1 == 'mtf' and trade_type == 'BUY':
+                mtf_amount_rupees = float(self.mtf_amount_entry.get().strip() or 0)
+                mtf_amount_paise = int(mtf_amount_rupees * 100)
+
             # Insert into database
             logger.debug(f"Connecting to database: {config.DB_PATH}")
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             c.execute("""
                 INSERT INTO trade_events (
-                    trade_date, equity, trade_type, quantity, price, brokerage, notes,
+                    trade_date, equity, trade_type, quantity, price, brokerage,
+                    brokerage_auto, brokerage_override, mtf_amount, notes,
                     type1, type2, strike, expiry, is_active
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (
-                trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes,
+                trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
+                brokerage_auto, brokerage_override, mtf_amount_paise, notes,
                 type1, type2, strike, expiry
             ))
             trade_id = c.lastrowid
@@ -831,6 +929,8 @@ class AddTradeTab:
         self.price_entry.delete(0, tk.END)
         self.brokerage_entry.delete(0, tk.END)
         self.brokerage_entry.insert(0, "0")
+        self.override_brokerage_var.set(False)
+        self.mtf_amount_entry.delete(0, tk.END)
         self.notes_entry.delete('1.0', tk.END)
         self.equity_entry.focus()
         self.update_status("Form cleared")

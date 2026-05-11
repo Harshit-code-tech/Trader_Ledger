@@ -7,6 +7,7 @@ from datetime import datetime
 
 from core.fifo_matcher import fetch_active_trades, match_fifo
 from core.pnl_calculator import calculate_match_pnl
+from core.mtf_interest import apply_mtf_interest
 from core.run_ledger import build_trades_by_id
 from core.trade_units import build_trade_units
 from core.utils import format_money, format_money_abs
@@ -115,7 +116,7 @@ class TradeViewTab:
 
         columns = (
             'Trade Label', 'Contract', 'Buy Qty', 'Avg Buy', 'Sell Qty', 'Avg Sell',
-            'P/L', 'Holding Days', 'Status', 'Remaining Qty'
+            'P/L', 'MTF Interest', 'Net P/L', 'Holding Days', 'Status', 'Remaining Qty'
         )
 
         self.units_tree = ttk.Treeview(
@@ -139,6 +140,8 @@ class TradeViewTab:
         self.units_tree.column('Sell Qty', width=80, anchor='e')
         self.units_tree.column('Avg Sell', width=100, anchor='e')
         self.units_tree.column('P/L', width=100, anchor='e')
+        self.units_tree.column('MTF Interest', width=110, anchor='e')
+        self.units_tree.column('Net P/L', width=110, anchor='e')
         self.units_tree.column('Holding Days', width=90, anchor='center')
         self.units_tree.column('Status', width=80, anchor='center')
         self.units_tree.column('Remaining Qty', width=110, anchor='e')
@@ -169,19 +172,20 @@ class TradeViewTab:
             trades = fetch_active_trades()
             if not trades:
                 self.units_tree.insert('', 'end', values=(
-                    "No trades found", "", "", "", "", "", "", "", "", ""
+                    "No trades found", "", "", "", "", "", "", "", "", "", "", ""
                 ), tags=('detail',))
                 return
 
             matches = match_fifo(trades)
             if not matches:
                 self.units_tree.insert('', 'end', values=(
-                    "No SELL trades yet", "", "", "", "", "", "", "", "", ""
+                    "No SELL trades yet", "", "", "", "", "", "", "", "", "", "", ""
                 ), tags=('detail',))
                 return
 
             trades_by_id = build_trades_by_id(trades)
             pnl_results = calculate_match_pnl(matches, trades_by_id)
+            pnl_results = apply_mtf_interest(pnl_results, trades_by_id)
             units = build_trade_units(
                 trades,
                 pnl_results,
@@ -202,13 +206,16 @@ class TradeViewTab:
 
             for unit in units:
                 pnl_display = format_money(unit['realized_pnl'])
+                mtf_display = format_money_abs(unit.get('mtf_interest', 0)) if unit.get('mtf_interest') else ""
+                net_display = format_money(unit.get('net_pnl', unit['realized_pnl']))
                 avg_buy_display = format_money_abs(unit['avg_buy_price'])
                 avg_sell_display = format_money_abs(unit['avg_sell_price']) if unit['total_sell_qty'] else ""
 
                 remaining_display = f"{unit['remaining_qty']:,}" if unit['remaining_qty'] else ""
                 holding_display = str(unit['holding_days']) if unit['holding_days'] else ""
 
-                row_tag = 'profit' if unit['realized_pnl'] > 0 else 'loss' if unit['realized_pnl'] < 0 else 'open'
+                net_pnl_value = unit.get('net_pnl', unit['realized_pnl'])
+                row_tag = 'profit' if net_pnl_value > 0 else 'loss' if net_pnl_value < 0 else 'open'
                 status_tag = 'status_closed' if unit['status'] == 'Closed' else 'status_open'
 
                 parent_id = self.units_tree.insert('', 'end', values=(
@@ -219,6 +226,8 @@ class TradeViewTab:
                     f"{unit['total_sell_qty']:,}" if unit['total_sell_qty'] else "",
                     avg_sell_display,
                     pnl_display,
+                    mtf_display,
+                    net_display,
                     holding_display,
                     unit['status'],
                     remaining_display
@@ -226,6 +235,8 @@ class TradeViewTab:
 
                 detail_text = f"Buy IDs: {', '.join(map(str, unit['buy_trade_ids'])) or '-'}"
                 detail_text += f" | Sell IDs: {', '.join(map(str, unit['sell_trade_ids'])) or '-'}"
+                if unit.get('mtf_interest'):
+                    detail_text += f" | MTF Interest: {format_money_abs(unit['mtf_interest'])}"
 
                 if unit['status'] == 'Open':
                     remaining_display = format_money_abs(unit['remaining_investment'])
@@ -233,6 +244,8 @@ class TradeViewTab:
 
                 self.units_tree.insert(parent_id, 'end', values=(
                     detail_text,
+                    "",
+                    "",
                     "",
                     "",
                     "",
@@ -273,7 +286,7 @@ class TradeViewTab:
         total_trades = len(units)
         closed_trades = sum(1 for u in units if u['status'] == 'Closed')
         open_trades = sum(1 for u in units if u['status'] == 'Open')
-        total_pnl = sum(u['realized_pnl'] for u in units)
+        total_pnl = sum(u.get('net_pnl', u['realized_pnl']) for u in units)
 
         self.total_trades_var.set(str(total_trades))
         self.closed_trades_var.set(str(closed_trades))
@@ -296,6 +309,8 @@ class TradeViewTab:
 
             self.units_tree.insert(parent_id, 'end', values=(
                 detail,
+                "",
+                "",
                 "",
                 "",
                 "",

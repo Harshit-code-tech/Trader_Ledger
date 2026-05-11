@@ -33,6 +33,8 @@ class TradeUnit(TypedDict):
     total_buy_cost: int
     total_sell_value: int
     realized_pnl: int
+    mtf_interest: int
+    net_pnl: int
     remaining_investment: int
     holding_days: int
     status: str
@@ -58,6 +60,8 @@ class UnitAccumulator:
     matched_buy_cost: int = 0
     matched_buy_brokerage: int = 0
     realized_pnl: int = 0
+    mtf_interest: int = 0
+    net_pnl: int = 0
     first_buy_date: str | None = None
     last_sell_date: str | None = None
     buy_trade_ids: list[int] | None = None
@@ -215,6 +219,8 @@ def _build_lifecycle_units(
                 current.last_sell_date = trade_date
                 for pnl in pnl_by_sell.get(trade_id, []):
                     current.realized_pnl += pnl['realized_pnl']
+                    current.mtf_interest += pnl.get('mtf_interest', 0)
+                    current.net_pnl += pnl.get('net_pnl', pnl['realized_pnl'])
                     current.matched_buy_cost += pnl['buy_cost']
                     current.matched_buy_brokerage += pnl['buy_brokerage_alloc']
 
@@ -296,6 +302,8 @@ def _build_sell_units(
             total_buy_cost=buy_cost + buy_brokerage,
             total_sell_value=sell_value - sell_brokerage,
             realized_pnl=realized_pnl,
+            mtf_interest=sum(p.get('mtf_interest', 0) for p in sell_matches),
+            net_pnl=sum(p.get('net_pnl', p['realized_pnl']) for p in sell_matches),
             remaining_investment=0,
             holding_days=holding_days,
             status="Closed",
@@ -383,6 +391,8 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
         total_buy_cost=total_buy_cost,
         total_sell_value=total_sell_value,
         realized_pnl=unit.realized_pnl,
+        mtf_interest=unit.mtf_interest,
+        net_pnl=unit.net_pnl if unit.net_pnl else unit.realized_pnl,
         remaining_investment=remaining_investment,
         holding_days=holding_days,
         status=status,

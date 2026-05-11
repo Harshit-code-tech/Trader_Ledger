@@ -25,6 +25,7 @@ from typing import Callable, Optional
 from core.logger import get_logger
 from core.utils import format_money
 from core.trade_validation import normalize_trade_classification
+from core.brokerage import calculate_brokerage_auto
 import config
 
 logger = get_logger('ui.view_records_tab')
@@ -433,7 +434,7 @@ class ViewRecordsTab:
                 # Normalize display values
                 type1_display = (type1 or "delivery").upper()
                 type2_display = type2 if type2 else ""
-                strike_display = f"{strike:.2f}" if strike is not None else ""
+                    strike_display = f"{strike:.2f}" if strike is not None else ""
                 expiry_display = ""
                 if expiry:
                     year_e, month_e, day_e = expiry.split('-')
@@ -570,7 +571,8 @@ class ViewRecordsTab:
             c = conn.cursor()
             c.execute("""
                 SELECT trade_date, equity, trade_type, type1, type2, strike, expiry,
-                       quantity, price, brokerage, notes, is_active
+                       quantity, price, brokerage, brokerage_auto, brokerage_override,
+                       mtf_amount, notes, is_active
                 FROM trade_events
                 WHERE id = ?
             """, (trade_id,))
@@ -818,7 +820,16 @@ class ViewRecordsTab:
             # Update database
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
-            c.execute(f"UPDATE trade_events SET {db_field} = ? WHERE id = ?", (db_value, trade_id))
+
+            if col_name == 'Brokerage':
+                # Inline brokerage edit is treated as explicit override
+                c.execute(
+                    "UPDATE trade_events SET brokerage = ?, brokerage_auto = 0, brokerage_override = ? WHERE id = ?",
+                    (db_value, db_value, trade_id)
+                )
+            else:
+                c.execute(f"UPDATE trade_events SET {db_field} = ? WHERE id = ?", (db_value, trade_id))
+
             conn.commit()
             conn.close()
             
@@ -845,6 +856,8 @@ Required Columns:
 
 Optional Columns:
 • Brokerage (in rupees, default 0)
+• BrokerageOverride (in rupees, optional)
+• MtfAmount (in rupees, required for MTF BUY only)
 • Notes (any text)
 • Type1 (intraday/delivery/mtf/futures/options)
 • Type2 (CE/PE, required for options only)
@@ -853,10 +866,10 @@ Optional Columns:
 
 Example CSV:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Date,Stock,Type,Qty,Price,Brokerage,Notes,Type1,Type2,Strike,Expiry
-20-01-2026,TCS,BUY,10,350.50,10.00,Sample trade,delivery,,,
-21-01-2026,RELIANCE,BUY,5,280.00,8.00,Another trade,intraday,,,
-22-01-2026,NIFTY,BUY,50,12.00,2.00,Options entry,options,CE,22500,25-01-2026
+Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,Notes,Type1,Type2,Strike,Expiry
+20-01-2026,TCS,BUY,10,350.50,10.00,,0,Sample trade,delivery,,,
+21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,Another trade,intraday,,,
+22-01-2026,NIFTY,BUY,50,12.00,2.00,,0,Options entry,options,CE,22500,25-01-2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample file available at:
@@ -950,6 +963,16 @@ Tips:
                         if 'Brokerage' in row and row['Brokerage'].strip():
                             brokerage_rupees = float(row['Brokerage'])
                             brokerage_paise = int(brokerage_rupees * 100)
+
+                        brokerage_override = None
+                        if 'BrokerageOverride' in row and row['BrokerageOverride'].strip():
+                            override_rupees = float(row['BrokerageOverride'])
+                            brokerage_override = int(override_rupees * 100)
+
+                        mtf_amount_paise = 0
+                        if 'MtfAmount' in row and row['MtfAmount'].strip():
+                            mtf_amount_rupees = float(row['MtfAmount'])
+                            mtf_amount_paise = int(mtf_amount_rupees * 100)
                         
                         notes = row.get('Notes', '').strip()
 
@@ -968,16 +991,40 @@ Tips:
                             expiry_raw,
                             require_type1=True
                         )
+
+                        type1_norm = (type1 or '').lower()
+
+                        if type1_norm == 'mtf' and trade_type == 'BUY' and mtf_amount_paise <= 0:
+                            raise ValueError("MTF amount is required for MTF BUY trades")
+
+                        # Determine brokerage auto/override
+                        if brokerage_override is not None:
+                            brokerage_auto = 0
+                            brokerage_paise = brokerage_override
+                        elif brokerage_paise > 0:
+                            # Legacy Brokerage column behaves like override for imports
+                            brokerage_auto = 0
+                            brokerage_override = brokerage_paise
+                        else:
+                            try:
+                                brokerage_paise, _rate_ppm = calculate_brokerage_auto(
+                                    quantity, price_paise, type1_norm, trade_type
+                                )
+                                brokerage_auto = brokerage_paise
+                            except Exception:
+                                raise ValueError("Brokerage override required when rate is not configured")
                         
                         # Insert into database
                         cursor.execute("""
                             INSERT INTO trade_events (
-                                trade_date, equity, trade_type, quantity, price, brokerage, notes,
+                                trade_date, equity, trade_type, quantity, price, brokerage,
+                                brokerage_auto, brokerage_override, mtf_amount, notes,
                                 type1, type2, strike, expiry, is_active
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                         """, (
-                            trade_date, equity, trade_type, quantity, price_paise, brokerage_paise, notes,
+                            trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
+                            brokerage_auto, brokerage_override, mtf_amount_paise, notes,
                             type1, type2, strike, expiry
                         ))
                         
@@ -1241,11 +1288,13 @@ class EditTradeDialog:
         
         # Unpack trade data
         (trade_date, equity, trade_type, type1, type2, strike, expiry,
-         quantity, price_paise, brokerage_paise, notes, _) = trade_data
+         quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
+         mtf_amount_paise, notes, _) = trade_data
         
         # Convert for display
         price_rupees = price_paise / 100
         brokerage_rupees = brokerage_paise / 100
+        mtf_amount_rupees = (mtf_amount_paise or 0) / 100
         year, month, day = trade_date.split('-')
         display_date = f"{day}-{month}-{year}"
         
@@ -1353,6 +1402,23 @@ class EditTradeDialog:
         self.brokerage_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.brokerage_entry.insert(0, f"{brokerage_rupees:.2f}")
         row += 1
+
+        # Brokerage override flag (display)
+        self.override_brokerage_var = tk.BooleanVar(value=brokerage_override is not None)
+        self.override_brokerage_check = ttk.Checkbutton(
+            main_frame,
+            text="Override brokerage (edit value)",
+            variable=self.override_brokerage_var
+        )
+        self.override_brokerage_check.grid(row=row, column=1, sticky='w', padx=5, pady=(0, 8))
+        row += 1
+
+        # MTF amount
+        ttk.Label(main_frame, text="MTF Amount (₹):", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.mtf_amount_entry = ttk.Entry(main_frame, width=25)
+        self.mtf_amount_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.mtf_amount_entry.insert(0, f"{mtf_amount_rupees:.2f}")
+        row += 1
         
         # Notes
         ttk.Label(main_frame, text="Notes:", font=('Arial', 10)).grid(row=row, column=0, sticky='ne', padx=5, pady=8)
@@ -1429,6 +1495,25 @@ class EditTradeDialog:
             
             brokerage_rupees = float(self.brokerage_entry.get())
             brokerage_paise = int(brokerage_rupees * 100)
+            if self.override_brokerage_var.get():
+                brokerage_override = brokerage_paise
+                brokerage_auto = 0
+            else:
+                try:
+                    brokerage_paise, _rate_ppm = calculate_brokerage_auto(
+                        quantity, price_paise, type1, trade_type
+                    )
+                    brokerage_auto = brokerage_paise
+                    brokerage_override = None
+                except Exception:
+                    messagebox.showerror(
+                        "Brokerage Required",
+                        "Brokerage rate not configured. Enable override and enter brokerage manually."
+                    )
+                    return
+
+            mtf_amount_rupees = float(self.mtf_amount_entry.get() or 0)
+            mtf_amount_paise = int(mtf_amount_rupees * 100)
             
             notes = self.notes_entry.get('1.0', 'end-1c').strip()
 
@@ -1448,11 +1533,13 @@ class EditTradeDialog:
             c.execute("""
                 UPDATE trade_events
                 SET trade_date = ?, equity = ?, trade_type = ?, type1 = ?, type2 = ?,
-                    strike = ?, expiry = ?, quantity = ?, price = ?, brokerage = ?, notes = ?
+                    strike = ?, expiry = ?, quantity = ?, price = ?, brokerage = ?,
+                    brokerage_auto = ?, brokerage_override = ?, mtf_amount = ?, notes = ?
                 WHERE id = ?
             """, (
                 trade_date, equity, trade_type, type1, type2, strike, expiry,
-                quantity, price_paise, brokerage_paise, notes, self.trade_id
+                quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
+                mtf_amount_paise, notes, self.trade_id
             ))
             conn.commit()
             conn.close()

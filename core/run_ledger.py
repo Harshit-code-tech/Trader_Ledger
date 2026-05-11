@@ -1,6 +1,8 @@
 from core.fifo_matcher import fetch_active_trades, match_fifo, TradeTuple, FifoMatchError
 from core.pnl_calculator import calculate_match_pnl, TradeDict, PnlResult, PnlCalculationError
 from core.pnl_aggregator import aggregate_pnl_by_date, aggregate_pnl_by_month
+from core.mtf_interest import apply_mtf_interest
+from core.brokerage import get_effective_brokerage
 import sqlite3
 import sys
 import config
@@ -32,9 +34,16 @@ def build_trades_by_id(trades: list[TradeTuple]) -> dict[int, TradeDict]:
         expiry=t[7],
         quantity=t[8],
         price=t[9],
-        brokerage=t[10],
+        brokerage=get_effective_brokerage({
+            'brokerage': t[10],
+            'brokerage_auto': t[13],
+            'brokerage_override': t[14]
+        }),
         notes=t[11],
-        is_active=t[12]
+        is_active=t[12],
+        brokerage_auto=t[13],
+        brokerage_override=t[14],
+        mtf_amount=t[15]
     ) for t in trades}
 
 def main() -> None:
@@ -93,10 +102,13 @@ def main() -> None:
             print("Add SELL trades to see profit/loss calculations.")
             return
 
+        # 3b. Apply MTF interest layer (post-FIFO)
+        match_results = apply_mtf_interest(match_results, trades_by_id)
+
         # 4. Run Phase-4 aggregators
-        daily_pnl: dict[str, int] = aggregate_pnl_by_date(match_results, trades_by_id)
+        daily_pnl: dict[str, int] = aggregate_pnl_by_date(match_results, trades_by_id, pnl_field="net_pnl")
         monthly_pnl: dict[str, int] = aggregate_pnl_by_month(daily_pnl)
-        total_pnl: int = sum(m['realized_pnl'] for m in match_results)
+        total_pnl: int = sum(m['net_pnl'] for m in match_results)
 
         # 5. Print results
         print("\n" + "="*60)

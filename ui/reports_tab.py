@@ -27,6 +27,7 @@ import config
 from core.logger import get_logger
 from core.fifo_matcher import fetch_active_trades, match_fifo
 from core.pnl_calculator import calculate_match_pnl
+from core.mtf_interest import apply_mtf_interest
 from core.pnl_aggregator import (
     aggregate_pnl_by_date,
     aggregate_pnl_by_week,
@@ -34,6 +35,7 @@ from core.pnl_aggregator import (
     aggregate_pnl_by_year,
     aggregate_pnl_by_sell,
     aggregate_pnl_by_equity,
+    aggregate_trade_value_by_date,
     filter_matches_by_date_range
 )
 from core.open_positions import calculate_open_positions, get_unique_equities, OpenPosition
@@ -298,7 +300,7 @@ class ReportsTab:
         """Create dynamic P/L breakdown table that changes based on period selection."""
         context_label = ttk.Label(
             parent,
-            text="Showing SELL-based P/L (FIFO applied, realized only)",
+            text="Showing SELL-based Net P/L (FIFO + MTF interest)",
             font=('Consolas', 9),
             foreground='gray'
         )
@@ -355,7 +357,7 @@ class ReportsTab:
 
         ttk.Label(
             parent,
-            text="Closed P/L per stock (FIFO applied)",
+            text="Net P/L per stock (FIFO + MTF interest applied)",
             font=('Consolas', 9),
             foreground='gray'
         ).pack(anchor='w', pady=(0, 5))
@@ -560,10 +562,10 @@ class ReportsTab:
         cards_frame.columnconfigure(1, weight=1)
         cards_frame.columnconfigure(2, weight=1)
 
-        profit_card = ttk.LabelFrame(cards_frame, text="📈 Total Profit", padding="20")
+        profit_card = ttk.LabelFrame(cards_frame, text="📈 Net Profit", padding="20")
         profit_card.grid(row=0, column=0, padx=15, pady=10, sticky='ew')
 
-        ttk.Label(profit_card, text="Total Profit", font=('Consolas', 9), foreground='gray').pack()
+        ttk.Label(profit_card, text="Net Profit", font=('Consolas', 9), foreground='gray').pack()
 
         self.profit_label = ttk.Label(
             profit_card,
@@ -573,10 +575,10 @@ class ReportsTab:
         )
         self.profit_label.pack(pady=(5, 0))
 
-        loss_card = ttk.LabelFrame(cards_frame, text="📉 Total Loss", padding="20")
+        loss_card = ttk.LabelFrame(cards_frame, text="📉 Net Loss", padding="20")
         loss_card.grid(row=0, column=1, padx=15, pady=10, sticky='ew')
 
-        ttk.Label(loss_card, text="Total Loss", font=('Consolas', 9), foreground='gray').pack()
+        ttk.Label(loss_card, text="Net Loss", font=('Consolas', 9), foreground='gray').pack()
 
         self.loss_label = ttk.Label(
             loss_card,
@@ -641,6 +643,9 @@ class ReportsTab:
         self.median_holding_label = add_metric(4, 1, "Median Holding (days)")
         self.max_drawdown_label = add_metric(4, 2, "Max Drawdown (₹)")
 
+        self.day_trade_value_label = add_metric(6, 0, "Avg Day Trade Value (₹)")
+        self.total_trade_value_label = add_metric(6, 1, "Total Trade Value (₹)")
+
     def calculate_reports(self) -> None:
         """
         Recalculate all reports from scratch.
@@ -673,6 +678,7 @@ class ReportsTab:
 
             trades_by_id = build_trades_by_id(trades)
             pnl_results = calculate_match_pnl(matches, trades_by_id)
+            pnl_results = apply_mtf_interest(pnl_results, trades_by_id)
             logger.info(f"Calculated P/L for {len(pnl_results)} matches")
 
             filtered_pnl_results = pnl_results
@@ -712,10 +718,10 @@ class ReportsTab:
             equities = ["All"] + get_unique_equities(trades_by_id)
             self._set_equity_listbox_values(equities)
 
-            equity_pnl_totals = aggregate_pnl_by_equity(filtered_pnl_results, trades_by_id)
+            equity_pnl_totals = aggregate_pnl_by_equity(filtered_pnl_results, trades_by_id, pnl_field="net_pnl")
             self.equity_pnl = self._convert_to_pnl_breakdown(equity_pnl_totals)
 
-            daily_pnl_totals = aggregate_pnl_by_date(filtered_pnl_results, trades_by_id)
+            daily_pnl_totals = aggregate_pnl_by_date(filtered_pnl_results, trades_by_id, pnl_field="net_pnl")
             weekly_pnl_totals = aggregate_pnl_by_week(daily_pnl_totals)
             monthly_pnl_totals = aggregate_pnl_by_month(daily_pnl_totals)
             yearly_pnl_totals = aggregate_pnl_by_year(monthly_pnl_totals)
@@ -725,11 +731,11 @@ class ReportsTab:
             self.monthly_pnl = self._convert_to_pnl_breakdown(monthly_pnl_totals)
             self.yearly_pnl = self._convert_to_pnl_breakdown(yearly_pnl_totals)
 
-            self.total_profit = sum(pnl['realized_pnl'] for pnl in filtered_pnl_results if pnl['realized_pnl'] > 0)
-            self.total_loss = sum(pnl['realized_pnl'] for pnl in filtered_pnl_results if pnl['realized_pnl'] < 0)
+            self.total_profit = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] > 0)
+            self.total_loss = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] < 0)
             self.net_pnl = self.total_profit + self.total_loss
 
-            sell_totals = aggregate_pnl_by_sell(filtered_pnl_results)
+            sell_totals = aggregate_pnl_by_sell(filtered_pnl_results, pnl_field="net_pnl")
             wins = sum(1 for pnl in sell_totals.values() if pnl > 0)
             losses = sum(1 for pnl in sell_totals.values() if pnl < 0)
             total_trades = len(sell_totals)
@@ -770,6 +776,10 @@ class ReportsTab:
             median_holding_days = self._weighted_median(holding_buckets) if holding_buckets else 0.0
 
             max_drawdown = self._calculate_max_drawdown(daily_pnl_totals)
+
+            # Derived trade value metrics (based on matched trades)
+            trade_value_by_date = aggregate_trade_value_by_date(filtered_pnl_results, trades_by_id)
+            self.analytics['trade_value_by_date'] = trade_value_by_date
 
             self.analytics = {
                 'win_loss_ratio': win_loss_ratio,
@@ -818,6 +828,15 @@ class ReportsTab:
         else:
             self.emotion_label.config(text="😐")
             self.net_label.config(foreground='#34495e')
+
+        # Derived trade value metrics
+        trade_value_by_date = self.analytics.get('trade_value_by_date') or {}
+        total_trade_value = sum(trade_value_by_date.values()) if trade_value_by_date else 0
+        avg_day_trade_value = 0
+        if trade_value_by_date:
+            avg_day_trade_value = int(total_trade_value / max(len(trade_value_by_date), 1))
+        self.day_trade_value_label.config(text=format_money(avg_day_trade_value))
+        self.total_trade_value_label.config(text=format_money(total_trade_value))
 
         self.update_period_display()
 
