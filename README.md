@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
+[![Version](https://img.shields.io/badge/version-1.3-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -28,17 +28,16 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Offline First** - Works completely offline with all data stored locally
 - ✅ **Clean UI** - User-friendly Tkinter interface with calendar date picker and data validation
 
-## 🆕 What's New in v1.2
+## 🆕 What's New in v1.3
 
-Version 1.2 adds operational and auditability improvements:
+Version 1.3 brings reliability, profile-management, and reporting improvements:
 
-1. **Restore Deleted Trades** - Bring back soft-deleted records from View Records
-2. **Walkthrough Button** - Reopen the onboarding guide any time
-3. **Stock Suggestions** - Type a few characters and pick from matching symbols
-4. **Audit CSV** - Export match-level rows with brokerage, MTF, holding days, and remainder flags
-
-5. **Holding Days** - See day-diff for both closed and open positions
-6. **Total Trade Value** - See average day trade value and total trade value in Reports
+- **Integrated Tracing**: Added optional `blackbox_recorder` tracing and saved trace reports to `logs/` for easier debugging and auditability.
+- **Persistent Profile Selection**: The selected profile now persists between sessions and updates all tabs immediately when changed.
+- **Profile-aware Inserts**: All trade INSERTs and CSV imports now include `profile_id` to avoid NOT NULL constraint errors and reduce DB locking issues.
+- **Combined Profile Reports**: Combined-family reports correctly aggregate across selected profiles; added a profiles multi-select and a breakdown dropdown (Net / Profit / Loss).
+- **UI Improvements**: Profile selector dialog is resizable; fields and lists refresh immediately after profile changes; prevented saving/import when in Combined view to avoid ambiguous profile attribution.
+- **Packaging/Dependencies**: `blackbox-recorder` added to `requirements.txt` and PyInstaller spec for optional tracing in builds.
 
 👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
 👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details
