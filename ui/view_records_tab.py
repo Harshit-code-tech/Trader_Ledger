@@ -346,7 +346,11 @@ class ViewRecordsTab:
         try:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
-            c.execute("SELECT DISTINCT equity FROM trade_events ORDER BY equity")
+            # Apply profile filter when loading equities
+            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
+                c.execute("SELECT DISTINCT equity FROM trade_events ORDER BY equity")
+            else:
+                c.execute("SELECT DISTINCT equity FROM trade_events WHERE profile_id = ? ORDER BY equity", (config.CURRENT_PROFILE_ID,))
             equities = [row[0] for row in c.fetchall()]
             conn.close()
             
@@ -415,7 +419,12 @@ class ViewRecordsTab:
             if not self.show_deleted_trades.get():
                 query += " AND is_active = 1"  # Only show active trades
             # If checkbox is checked, show all (active + deleted)
-            
+            # Apply profile filter if set (0 => combined view)
+            import config as _config
+            if _config.CURRENT_PROFILE_ID is not None and _config.CURRENT_PROFILE_ID != 0:
+                query += " AND profile_id = ?"
+                params.append(_config.CURRENT_PROFILE_ID)
+
             query += " ORDER BY id DESC"
             
             # Execute query
@@ -535,6 +544,11 @@ class ViewRecordsTab:
 
         if not self.show_deleted_trades.get():
             where_clause += " AND is_active = 1"
+        # Apply profile filter if set (0 => combined view)
+        import config as _config
+        if _config.CURRENT_PROFILE_ID is not None and _config.CURRENT_PROFILE_ID != 0:
+            where_clause += " AND profile_id = ?"
+            params.append(_config.CURRENT_PROFILE_ID)
 
         return where_clause, params
 
@@ -1034,138 +1048,151 @@ Tips:
                     logger.warning(f"Invalid CSV format: missing required columns")
                     return
                 
-                conn = sqlite3.connect(str(config.DB_PATH))
-                cursor = conn.cursor()
-                
-                for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
-                    try:
-                        # Parse date (supports DD-MM-YYYY or YYYY-MM-DD)
-                        date_str = row['Date'].strip()
-                        if not date_str:
-                            raise ValueError("Date is empty")
-                        
-                        if '-' in date_str:
-                            parts = date_str.split('-')
-                            if len(parts[0]) == 4:  # YYYY-MM-DD
-                                trade_date = date_str
-                            else:  # DD-MM-YYYY
-                                day, month, year = parts
-                                trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                        else:
-                            raise ValueError(f"Invalid date format: {date_str} (use DD-MM-YYYY or YYYY-MM-DD)")
-                        
-                        equity = row['Stock'].strip().upper()
-                        if not equity:
-                            raise ValueError("Stock symbol is empty")
-                        
-                        trade_type = row['Type'].strip().upper()
-                        if trade_type not in ['BUY', 'SELL']:
-                            raise ValueError(f"Type must be BUY or SELL, got: {trade_type}")
-                        
-                        quantity = int(row['Qty'])
-                        if quantity <= 0:
-                            raise ValueError(f"Quantity must be positive, got: {quantity}")
-                        
-                        price_rupees = float(row['Price'])
-                        if price_rupees <= 0:
-                            raise ValueError(f"Price must be positive, got: {price_rupees}")
-                        price_paise = int(price_rupees * 100)
-                        
-                        brokerage_paise = 0
-                        if 'Brokerage' in row and row['Brokerage'].strip():
-                            brokerage_rupees = float(row['Brokerage'])
-                            if brokerage_rupees < 0:
-                                raise ValueError("Brokerage must be >= 0")
-                            brokerage_paise = int(brokerage_rupees * 100)
+                try:
+                    profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
+                except Exception:
+                    profile_id = None
+                if profile_id == 0:
+                    messagebox.showwarning(
+                        "Select Profile",
+                        "Combined Family view cannot import trades. Select a profile first."
+                    )
+                    return
 
-                        brokerage_override = None
-                        if 'BrokerageOverride' in row and row['BrokerageOverride'].strip():
-                            override_rupees = float(row['BrokerageOverride'])
-                            if override_rupees < 0:
-                                raise ValueError("Brokerage override must be >= 0")
-                            brokerage_override = int(override_rupees * 100)
+                with sqlite3.connect(str(config.DB_PATH), timeout=10) as conn:
+                    conn.execute("PRAGMA foreign_keys = ON")
+                    cursor = conn.cursor()
+                    if profile_id is None:
+                        cursor.execute("SELECT id FROM profiles WHERE profile_name = ?", ("Baba",))
+                        rr = cursor.fetchone()
+                        profile_id = rr[0] if rr else 1
 
-                        mtf_amount_paise = 0
-                        if 'MtfAmount' in row and row['MtfAmount'].strip():
-                            mtf_amount_rupees = float(row['MtfAmount'])
-                            if mtf_amount_rupees < 0:
-                                raise ValueError("MTF amount must be >= 0")
-                            mtf_amount_paise = int(mtf_amount_rupees * 100)
-                        
-                        notes = row.get('Notes', '').strip()
+                    for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
+                        try:
+                            # Parse date (supports DD-MM-YYYY or YYYY-MM-DD)
+                            date_str = row['Date'].strip()
+                            if not date_str:
+                                raise ValueError("Date is empty")
 
-                        trade_ts = ""
-                        if 'TradeTS' in row and row['TradeTS'].strip():
-                            trade_ts = row['TradeTS'].strip()
-                        if not trade_ts:
-                            trade_ts = make_trade_ts(trade_date, "09:15:00")
+                            if '-' in date_str:
+                                parts = date_str.split('-')
+                                if len(parts[0]) == 4:  # YYYY-MM-DD
+                                    trade_date = date_str
+                                else:  # DD-MM-YYYY
+                                    day, month, year = parts
+                                    trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                            else:
+                                raise ValueError(f"Invalid date format: {date_str} (use DD-MM-YYYY or YYYY-MM-DD)")
 
-                        type1_raw = (row.get('Type1') or '').strip()
-                        type2_raw = (row.get('Type2') or '').strip()
-                        strike_raw = (row.get('Strike') or '').strip()
-                        expiry_raw = (row.get('Expiry') or '').strip()
+                            equity = row['Stock'].strip().upper()
+                            if not equity:
+                                raise ValueError("Stock symbol is empty")
 
-                        if not type1_raw:
-                            type1_raw = 'delivery'
+                            trade_type = row['Type'].strip().upper()
+                            if trade_type not in ['BUY', 'SELL']:
+                                raise ValueError(f"Type must be BUY or SELL, got: {trade_type}")
 
-                        type1, type2, strike, expiry = normalize_trade_classification(
-                            type1_raw,
-                            type2_raw,
-                            strike_raw,
-                            expiry_raw,
-                            require_type1=True
-                        )
+                            quantity = int(row['Qty'])
+                            if quantity <= 0:
+                                raise ValueError(f"Quantity must be positive, got: {quantity}")
 
-                        type1_norm = (type1 or '').lower()
+                            price_rupees = float(row['Price'])
+                            if price_rupees <= 0:
+                                raise ValueError(f"Price must be positive, got: {price_rupees}")
+                            price_paise = int(price_rupees * 100)
 
-                        if type1_norm == 'mtf' and trade_type == 'BUY' and mtf_amount_paise <= 0:
-                            raise ValueError("MTF amount is required for MTF BUY trades")
+                            brokerage_paise = 0
+                            if 'Brokerage' in row and row['Brokerage'].strip():
+                                brokerage_rupees = float(row['Brokerage'])
+                                if brokerage_rupees < 0:
+                                    raise ValueError("Brokerage must be >= 0")
+                                brokerage_paise = int(brokerage_rupees * 100)
 
-                        if type1_norm == 'mtf' and trade_type == 'BUY':
-                            trade_amount = quantity * price_paise
-                            if mtf_amount_paise > trade_amount:
-                                raise ValueError("MTF amount cannot exceed buy trade amount")
+                            brokerage_override = None
+                            if 'BrokerageOverride' in row and row['BrokerageOverride'].strip():
+                                override_rupees = float(row['BrokerageOverride'])
+                                if override_rupees < 0:
+                                    raise ValueError("Brokerage override must be >= 0")
+                                brokerage_override = int(override_rupees * 100)
 
-                        # Determine brokerage auto/override
-                        if brokerage_override is not None:
-                            brokerage_auto = 0
-                            brokerage_paise = brokerage_override
-                        elif brokerage_paise > 0:
-                            # Legacy Brokerage column behaves like override for imports
-                            brokerage_auto = 0
-                            brokerage_override = brokerage_paise
-                        else:
-                            try:
-                                brokerage_paise, _rate_ppm = calculate_brokerage_auto(
-                                    quantity, price_paise, type1_norm, trade_type
-                                )
-                                brokerage_auto = brokerage_paise
-                            except Exception:
-                                raise ValueError("Brokerage override required when rate is not configured")
-                        
-                        # Insert into database
-                        cursor.execute("""
-                            INSERT INTO trade_events (
-                                trade_date, equity, trade_type, quantity, price, brokerage,
-                                brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
-                                type1, type2, strike, expiry, is_active
+                            mtf_amount_paise = 0
+                            if 'MtfAmount' in row and row['MtfAmount'].strip():
+                                mtf_amount_rupees = float(row['MtfAmount'])
+                                if mtf_amount_rupees < 0:
+                                    raise ValueError("MTF amount must be >= 0")
+                                mtf_amount_paise = int(mtf_amount_rupees * 100)
+
+                            notes = row.get('Notes', '').strip()
+
+                            trade_ts = ""
+                            if 'TradeTS' in row and row['TradeTS'].strip():
+                                trade_ts = row['TradeTS'].strip()
+                            if not trade_ts:
+                                trade_ts = make_trade_ts(trade_date, "09:15:00")
+
+                            type1_raw = (row.get('Type1') or '').strip()
+                            type2_raw = (row.get('Type2') or '').strip()
+                            strike_raw = (row.get('Strike') or '').strip()
+                            expiry_raw = (row.get('Expiry') or '').strip()
+
+                            if not type1_raw:
+                                type1_raw = 'delivery'
+
+                            type1, type2, strike, expiry = normalize_trade_classification(
+                                type1_raw,
+                                type2_raw,
+                                strike_raw,
+                                expiry_raw,
+                                require_type1=True
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                        """, (
-                            trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                            brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
-                            type1, type2, strike, expiry
-                        ))
-                        
-                        imported_count += 1
-                        
-                    except Exception as e:
-                        skipped_count += 1
-                        error_lines.append(f"Line {line_num}: {str(e)}")
-                        logger.warning(f"Skipped line {line_num}: {str(e)}")
-                
-                conn.commit()
-                conn.close()
+
+                            type1_norm = (type1 or '').lower()
+
+                            if type1_norm == 'mtf' and trade_type == 'BUY' and mtf_amount_paise <= 0:
+                                raise ValueError("MTF amount is required for MTF BUY trades")
+
+                            if type1_norm == 'mtf' and trade_type == 'BUY':
+                                trade_amount = quantity * price_paise
+                                if mtf_amount_paise > trade_amount:
+                                    raise ValueError("MTF amount cannot exceed buy trade amount")
+
+                            # Determine brokerage auto/override
+                            if brokerage_override is not None:
+                                brokerage_auto = 0
+                                brokerage_paise = brokerage_override
+                            elif brokerage_paise > 0:
+                                # Legacy Brokerage column behaves like override for imports
+                                brokerage_auto = 0
+                                brokerage_override = brokerage_paise
+                            else:
+                                try:
+                                    brokerage_paise, _rate_ppm = calculate_brokerage_auto(
+                                        quantity, price_paise, type1_norm, trade_type
+                                    )
+                                    brokerage_auto = brokerage_paise
+                                except Exception:
+                                    raise ValueError("Brokerage override required when rate is not configured")
+
+                            # Insert into database
+                            cursor.execute("""
+                                INSERT INTO trade_events (
+                                    trade_date, equity, trade_type, quantity, price, brokerage,
+                                    brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
+                                    type1, type2, strike, expiry, is_active, profile_id
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                            """, (
+                                trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
+                                brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
+                                type1, type2, strike, expiry, profile_id
+                            ))
+
+                            imported_count += 1
+
+                        except Exception as e:
+                            skipped_count += 1
+                            error_lines.append(f"Line {line_num}: {str(e)}")
+                            logger.warning(f"Skipped line {line_num}: {str(e)}")
             
             # Show result
             result_msg = f"\u2705 Imported {imported_count} trades successfully"

@@ -59,14 +59,26 @@ class TradeRecord:
 def fetch_active_trades() -> list[TradeTuple]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
+    # Apply profile filter if current profile is set (0 means combined view)
+    import config as _config
+    if _config.CURRENT_PROFILE_ID is None or _config.CURRENT_PROFILE_ID == 0:
+        cursor.execute('''
            SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
                quantity, price, brokerage, notes, is_active,
                brokerage_auto, brokerage_override, mtf_amount
         FROM trade_events
         WHERE is_active = 1
-           ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
-    ''')
+        ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ''')
+    else:
+        cursor.execute('''
+           SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
+               quantity, price, brokerage, notes, is_active,
+               brokerage_auto, brokerage_override, mtf_amount
+        FROM trade_events
+        WHERE is_active = 1 AND profile_id = ?
+        ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ''', (_config.CURRENT_PROFILE_ID,))
     trades = cursor.fetchall()
     conn.close()
     

@@ -639,7 +639,11 @@ class AddTradeTab:
         try:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
-            c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
+            # Filter equities by current profile if set (0 => combined view)
+            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
+                c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
+            else:
+                c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 AND profile_id = ? ORDER BY equity", (config.CURRENT_PROFILE_ID,))
             equities = [row[0] for row in c.fetchall()]
             conn.close()
 
@@ -867,25 +871,40 @@ class AddTradeTab:
 
             trade_ts = make_trade_ts(trade_date)
 
+            try:
+                profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
+            except Exception:
+                profile_id = None
+            if profile_id == 0:
+                messagebox.showwarning(
+                    "Select Profile",
+                    "Combined Family view cannot save trades. Select a profile first."
+                )
+                return
+
             # Insert into database
             logger.debug(f"Connecting to database: {config.DB_PATH}")
-            conn = sqlite3.connect(str(config.DB_PATH))
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO trade_events (
-                    trade_date, equity, trade_type, quantity, price, brokerage,
-                    brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
-                    type1, type2, strike, expiry, is_active
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            """, (
-                trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
-                type1, type2, strike, expiry
-            ))
-            trade_id = c.lastrowid
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(str(config.DB_PATH), timeout=10) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                c = conn.cursor()
+                if profile_id is None:
+                    c.execute("SELECT id FROM profiles WHERE profile_name = ?", ("Baba",))
+                    r = c.fetchone()
+                    profile_id = r[0] if r else 1
+
+                c.execute("""
+                    INSERT INTO trade_events (
+                        trade_date, equity, trade_type, quantity, price, brokerage,
+                        brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
+                        type1, type2, strike, expiry, is_active, profile_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """, (
+                    trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
+                    brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
+                    type1, type2, strike, expiry, profile_id
+                ))
+                trade_id = c.lastrowid
             
             # Success
             logger.info(f"✅ Trade saved successfully - ID: {trade_id}, {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
@@ -915,13 +934,24 @@ class AddTradeTab:
         try:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
-            c.execute("""
-                SELECT trade_date, equity, trade_type, quantity, price, brokerage
-                FROM trade_events
-                WHERE is_active = 1
-                ORDER BY id DESC
-                LIMIT 5
-            """)
+            # Apply profile filter if set (0 => combined view)
+            params = []
+            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
+                c.execute("""
+                    SELECT trade_date, equity, trade_type, quantity, price, brokerage
+                    FROM trade_events
+                    WHERE is_active = 1
+                    ORDER BY id DESC
+                    LIMIT 5
+                """)
+            else:
+                c.execute("""
+                    SELECT trade_date, equity, trade_type, quantity, price, brokerage
+                    FROM trade_events
+                    WHERE is_active = 1 AND profile_id = ?
+                    ORDER BY id DESC
+                    LIMIT 5
+                """, (config.CURRENT_PROFILE_ID,))
             trades = c.fetchall()
             conn.close()
             

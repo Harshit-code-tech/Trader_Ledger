@@ -40,6 +40,7 @@ DATA_DIR = get_data_directory()
 LOGS_DIR = DATA_DIR / "logs"
 EXPORTS_DIR = DATA_DIR / "exports"
 ONBOARDING_STATE_FILE = DATA_DIR / "onboarding_seen.txt"
+PROFILE_STATE_FILE = DATA_DIR / "profile_state.json"
 
 # Database
 DB_PATH = DATA_DIR / "trades.db"
@@ -93,4 +94,9 @@ except ImportError:
 ENABLE_DEBUG_MODE = False
 ENABLE_AUTO_BACKUP = True
 AUTO_BACKUP_ON_STARTUP = False
+
+# Current profile state (set at runtime by UI)
+# Integer profile id. Use 0 for Combined Family View. None means not selected yet.
+CURRENT_PROFILE_ID: int | None = None
+CURRENT_PROFILE_NAME: str | None = None
 

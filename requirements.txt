@@ -3,6 +3,7 @@
 
 # Runtime dependencies (required for application)
 tkcalendar>=1.6.1
+blackbox-recorder>=0.4.3
 
 # Build dependencies (only needed to create .exe installer)
 pyinstaller>=5.0

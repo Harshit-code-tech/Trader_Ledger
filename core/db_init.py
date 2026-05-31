@@ -57,6 +57,84 @@ def init_database(db_path: str | None = None) -> bool:
             )
         ''')
 
+        # Create profiles table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_name TEXT NOT NULL UNIQUE,
+                mobile TEXT,
+                email TEXT,
+                notes TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1))
+            )
+        ''')
+
+        # Ensure default profile 'Baba' exists for backward compatibility
+        cursor.execute("SELECT id FROM profiles WHERE profile_name = ?", ("Baba",))
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute("INSERT INTO profiles (profile_name, is_active) VALUES (?, 1)", ("Baba",))
+            logger.info("Created default profile 'Baba'")
+            default_profile_id = cursor.lastrowid
+        else:
+            default_profile_id = row[0]
+
+        # Add profile_id column (migrate existing trade_events rows into new table with FK)
+        cursor.execute("PRAGMA table_info(trade_events)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if "profile_id" not in existing_columns:
+            # Recreate table with profile_id and FK
+            cursor.execute('PRAGMA foreign_keys = OFF')
+            # Create a new table with the same schema plus profile_id
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS trade_events_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_date DATE NOT NULL,
+                    equity TEXT NOT NULL,
+                    trade_type TEXT NOT NULL CHECK (trade_type IN ("BUY", "SELL")),
+                    quantity INTEGER NOT NULL CHECK (quantity > 0),
+                    price NUMERIC NOT NULL CHECK (price > 0),
+                    brokerage NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage >= 0),
+                    brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0),
+                    brokerage_override NUMERIC CHECK (brokerage_override >= 0),
+                    mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0),
+                    trade_ts TEXT,
+                    notes TEXT,
+                    type1 TEXT CHECK (type1 IN ("intraday", "delivery", "mtf", "futures", "options") OR type1 IS NULL),
+                    type2 TEXT CHECK (type2 IN ("CE", "PE") OR type2 IS NULL),
+                    strike REAL CHECK (strike > 0 OR strike IS NULL),
+                    expiry DATE,
+                    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+                    profile_id INTEGER NOT NULL,
+                    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT
+                )
+            ''')
+
+            # Copy existing rows into new table, assigning default profile_id
+            cursor.execute(f"SELECT id, trade_date, equity, trade_type, quantity, price, brokerage, brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes, type1, type2, strike, expiry, is_active FROM trade_events")
+            rows = cursor.fetchall()
+            for r in rows:
+                cursor.execute('''
+                    INSERT INTO trade_events_new (
+                        id, trade_date, equity, trade_type, quantity, price, brokerage,
+                        brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
+                        type1, type2, strike, expiry, is_active, profile_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11],
+                    r[12], r[13], r[14], r[15], r[16], default_profile_id
+                ))
+
+            # Drop old table and rename new
+            cursor.execute('DROP TABLE trade_events')
+            cursor.execute('ALTER TABLE trade_events_new RENAME TO trade_events')
+            cursor.execute('PRAGMA foreign_keys = ON')
+            logger.info("Migrated trade_events to include profile_id and backfilled existing rows to 'Baba'")
+
+            # Refresh existing_columns set
+            cursor.execute("PRAGMA table_info(trade_events)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+
         # Ensure new columns exist for older databases
         cursor.execute("PRAGMA table_info(trade_events)")
         existing_columns = {row[1] for row in cursor.fetchall()}

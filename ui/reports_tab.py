@@ -161,6 +161,7 @@ class ReportsTab:
         self.filtered_open_positions = []
         self.equity_pnl = {}
         self.analytics = {}
+        self.profile_breakdown_data: dict[str, dict[str, int]] = {}
         self.audit_matches = []
         self.audit_trades_by_id = {}
 
@@ -170,6 +171,7 @@ class ReportsTab:
 
         # Period selection
         self.period_var = tk.StringVar(value="Daily")
+        self.profile_breakdown_mode_var = tk.StringVar(value="Net P/L")
 
         # Create UI
         self.create_widgets()
@@ -412,6 +414,75 @@ class ReportsTab:
         filter_frame = ttk.LabelFrame(parent, text="📊 Filters", style="Report.TLabelframe")
         filter_frame.pack(fill='x', pady=(0, 20))
 
+        row0 = ttk.Frame(filter_frame)
+        row0.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(row0, text="Profiles (combined view):", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+
+        profile_frame = ttk.Frame(row0)
+        profile_frame.pack(side='left', padx=5)
+
+        profile_scroll = ttk.Scrollbar(profile_frame, orient='vertical')
+        profile_scroll.pack(side='right', fill='y')
+
+        self.profile_listbox = tk.Listbox(
+            profile_frame,
+            selectmode='extended',
+            height=4,
+            width=18,
+            exportselection=False,
+            yscrollcommand=profile_scroll.set
+        )
+        self.profile_listbox.pack(side='left', fill='y')
+        profile_scroll.config(command=self.profile_listbox.yview)
+
+        self.profile_listbox.insert(tk.END, "All")
+        self.profile_listbox.selection_set(0)
+        Tooltip(self.profile_listbox, "Select profiles to include in Combined Family view")
+
+        def _on_profile_mouse_down(event: tk.Event) -> None:  # type: ignore
+            lb = event.widget
+            idx = lb.nearest(event.y)
+            lb.selection_clear(0, tk.END)
+            lb.selection_set(idx)
+            lb._anchor = idx
+
+        def _on_profile_drag(event: tk.Event) -> None:  # type: ignore
+            lb = event.widget
+            try:
+                anchor = lb._anchor
+            except AttributeError:
+                anchor = 0
+            idx = lb.nearest(event.y)
+            low = min(anchor, idx)
+            high = max(anchor, idx)
+            lb.selection_clear(0, tk.END)
+            lb.selection_set(low, high)
+
+        self.profile_listbox.bind('<Button-1>', _on_profile_mouse_down)
+        self.profile_listbox.bind('<B1-Motion>', _on_profile_drag)
+
+        profile_btns = ttk.Frame(row0)
+        profile_btns.pack(side='left', padx=(10, 0))
+
+        ttk.Button(
+            profile_btns,
+            text="Select All",
+            command=self.select_all_profiles,
+            width=12
+        ).pack(anchor='w', pady=(0, 5))
+
+        ttk.Button(
+            profile_btns,
+            text="Clear",
+            command=self.clear_profile_selection,
+            width=12
+        ).pack(anchor='w')
+
+        ttk.Label(row0, text="(Combined view only)", font=('Arial', 8), foreground='gray').pack(
+            side='left', padx=(10, 0)
+        )
+
         row1 = ttk.Frame(filter_frame)
         row1.pack(fill='x', pady=(0, 10))
 
@@ -623,6 +694,31 @@ class ReportsTab:
         )
         self.net_label.pack(side='left')
 
+        # Profile breakdown (used in Combined Family view)
+        self.profile_breakdown_frame = ttk.LabelFrame(parent, text="👪 Profile Breakdown", padding="10")
+        self.profile_breakdown_frame.pack(fill='x', pady=(10, 10))
+
+        breakdown_header = ttk.Frame(self.profile_breakdown_frame)
+        breakdown_header.pack(fill='x', pady=(0, 6))
+
+        ttk.Label(breakdown_header, text="Metric:", font=('Arial', 9)).pack(side='left')
+        self.profile_breakdown_mode_entry = ttk.Combobox(
+            breakdown_header,
+            textvariable=self.profile_breakdown_mode_var,
+            values=["Net P/L", "Profit", "Loss"],
+            state='readonly',
+            width=10
+        )
+        self.profile_breakdown_mode_entry.pack(side='left', padx=(6, 0))
+        self.profile_breakdown_mode_entry.bind('<<ComboboxSelected>>', lambda _e: self._refresh_profile_breakdown())
+
+        self.profile_tree = ttk.Treeview(self.profile_breakdown_frame, columns=('Profile', 'Value'), show='headings', height=4)
+        self.profile_tree.heading('Profile', text='Profile')
+        self.profile_tree.heading('Value', text='Net P/L (₹)')
+        self.profile_tree.column('Profile', width=200, anchor='w')
+        self.profile_tree.column('Value', width=120, anchor='e')
+        self.profile_tree.pack(fill='x')
+
     def create_analytics_section(self, parent: ttk.Frame) -> None:
         """Create analytics section for win/loss ratio and holding period."""
         analytics_frame = ttk.LabelFrame(parent, text="📈 Analytics", style="Report.TLabelframe")
@@ -671,30 +767,158 @@ class ReportsTab:
         self.update_status("⏳ Calculating P/L reports...")
 
         try:
-            trades = fetch_active_trades()
-            logger.info(f"Fetched {len(trades)} active trades")
+            import config as _config
 
-            if not trades:
-                messagebox.showinfo("No Data", "No active trades found in database.")
-                self.update_status("⚠️ No trades to analyze")
-                self.reset_displays()
-                return
+            original_profile = _config.CURRENT_PROFILE_ID
 
-            matches = match_fifo(trades)
-            logger.info(f"Generated {len(matches) if matches else 0} FIFO matches")
+            combined_filtered_pnl_results: list = []
+            combined_trades_by_id: dict = {}
+            profile_pnls: dict[str, int] = {}
+            profile_breakdown: dict[str, dict[str, int]] = {}
+            combined_matches: list = []
 
-            if not matches:
-                messagebox.showinfo("No Matches", "No SELL trades found. P/L can only be calculated after selling.")
-                self.update_status("⚠️ No realized P/L yet")
-                self.reset_displays()
-                return
+            try:
+                conn = sqlite3.connect(str(config.DB_PATH))
+                cur = conn.cursor()
+                cur.execute("SELECT profile_name FROM profiles WHERE is_active = 1 ORDER BY profile_name")
+                profile_names = [row[0] for row in cur.fetchall()]
+                conn.close()
+                self._set_profile_listbox_values(["All"] + profile_names)
+            except Exception:
+                pass
 
-            trades_by_id = build_trades_by_id(trades)
-            pnl_results = calculate_match_pnl(matches, trades_by_id)
-            pnl_results = apply_mtf_interest(pnl_results, trades_by_id)
-            logger.info(f"Calculated P/L for {len(pnl_results)} matches")
+            # If Combined Family view selected (0), compute per-profile and aggregate
+            if _config.CURRENT_PROFILE_ID == 0:
+                # Load active profiles
+                conn = sqlite3.connect(str(config.DB_PATH))
+                cur = conn.cursor()
+                cur.execute("SELECT id, profile_name FROM profiles WHERE is_active = 1 ORDER BY profile_name")
+                profiles = cur.fetchall()
+                conn.close()
 
-            filtered_pnl_results = pnl_results
+                if not profiles:
+                    messagebox.showinfo("No Profiles", "No active profiles found in database.")
+                    self.update_status("⚠️ No profiles to analyze")
+                    self.reset_displays()
+                    return
+
+                selected_profiles = self._get_selected_profiles()
+                if selected_profiles:
+                    profiles = [
+                        (pid, pname)
+                        for pid, pname in profiles
+                        if pname in selected_profiles
+                    ]
+
+                if not profiles:
+                    messagebox.showinfo("No Profiles", "No matching profiles selected.")
+                    self.update_status("⚠️ No profiles selected")
+                    self.reset_displays()
+                    return
+
+                for pid, pname in profiles:
+                    try:
+                        _config.CURRENT_PROFILE_ID = pid
+                        trades = fetch_active_trades()
+                        logger.info(f"Fetched {len(trades)} active trades for profile {pname}")
+                        if not trades:
+                            profile_pnls[pname] = 0
+                            profile_breakdown[pname] = {"profit": 0, "loss": 0, "net": 0}
+                            continue
+
+                        matches = match_fifo(trades)
+                        if not matches:
+                            profile_pnls[pname] = 0
+                            profile_breakdown[pname] = {"profit": 0, "loss": 0, "net": 0}
+                            continue
+
+                        trades_by_id = build_trades_by_id(trades)
+                        pnl_results = calculate_match_pnl(matches, trades_by_id)
+                        pnl_results = apply_mtf_interest(pnl_results, trades_by_id)
+                        combined_matches.extend(matches)
+
+                        # Apply UI filters per-profile (date/equity/type1/expiry)
+                        filtered_pnl_results = pnl_results
+
+                        from_date = (self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip()) or None
+                        to_date = (self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip()) or None
+                        if from_date or to_date:
+                            filtered_pnl_results = filter_matches_by_date_range(filtered_pnl_results, trades_by_id, from_date, to_date)
+
+                        selected_equities = self._get_selected_equities()
+                        if selected_equities:
+                            filtered_pnl_results = [
+                                pnl for pnl in filtered_pnl_results
+                                if trades_by_id[pnl['sell_id']]['equity'] in selected_equities
+                            ]
+
+                        type1_filter = self.type1_filter_var.get().strip().lower()
+                        if type1_filter and type1_filter != "all":
+                            filtered_pnl_results = [
+                                pnl for pnl in filtered_pnl_results
+                                if (trades_by_id[pnl['sell_id']].get('type1') or "delivery") == type1_filter
+                            ]
+
+                        expiry_month = self.expiry_filter_entry.get().strip() if hasattr(self, 'expiry_filter_entry') else self.expiry_month_var.get().strip()
+                        if expiry_month:
+                            filtered_pnl_results = [
+                                pnl for pnl in filtered_pnl_results
+                                if (trades_by_id[pnl['sell_id']].get('expiry') or "").startswith(expiry_month)
+                            ]
+
+                        # Sum net_pnl for this profile
+                        profile_profit = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] > 0)
+                        profile_loss = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] < 0)
+                        profile_total = profile_profit + profile_loss
+                        profile_pnls[pname] = profile_total
+                        profile_breakdown[pname] = {
+                            "profit": profile_profit,
+                            "loss": profile_loss,
+                            "net": profile_total
+                        }
+
+                        # Accumulate for combined reporting
+                        combined_filtered_pnl_results.extend(filtered_pnl_results)
+                        combined_trades_by_id.update(trades_by_id)
+
+                    except Exception as e:
+                        logger.warning(f"Failed to compute P/L for profile {pname}: {e}")
+
+                # Restore original profile selection
+                _config.CURRENT_PROFILE_ID = original_profile
+
+                # Use combined results for downstream aggregations
+                filtered_pnl_results = combined_filtered_pnl_results
+                trades_by_id = combined_trades_by_id
+                matches = combined_matches
+
+                logger.info(f"Aggregated combined P/L across {len(profile_pnls)} profiles")
+
+            else:
+                trades = fetch_active_trades()
+                logger.info(f"Fetched {len(trades)} active trades")
+
+                if not trades:
+                    messagebox.showinfo("No Data", "No active trades found in database.")
+                    self.update_status("⚠️ No trades to analyze")
+                    self.reset_displays()
+                    return
+
+                matches = match_fifo(trades)
+                logger.info(f"Generated {len(matches) if matches else 0} FIFO matches")
+
+                if not matches:
+                    messagebox.showinfo("No Matches", "No SELL trades found. P/L can only be calculated after selling.")
+                    self.update_status("⚠️ No realized P/L yet")
+                    self.reset_displays()
+                    return
+
+                trades_by_id = build_trades_by_id(trades)
+                pnl_results = calculate_match_pnl(matches, trades_by_id)
+                pnl_results = apply_mtf_interest(pnl_results, trades_by_id)
+                logger.info(f"Calculated P/L for {len(pnl_results)} matches")
+
+                filtered_pnl_results = pnl_results
 
             from_date = (self.from_date_entry.get().strip() if hasattr(self, 'from_date_entry') else self.from_date_var.get().strip()) or None
             to_date = (self.to_date_entry.get().strip() if hasattr(self, 'to_date_entry') else self.to_date_var.get().strip()) or None
@@ -728,6 +952,17 @@ class ReportsTab:
 
             self.audit_matches = list(filtered_pnl_results)
             self.audit_trades_by_id = trades_by_id
+
+            # If combined view, update profile breakdown UI
+            try:
+                import config as _config
+                if _config.CURRENT_PROFILE_ID == 0:
+                    self.profile_breakdown_data = profile_breakdown
+                else:
+                    self.profile_breakdown_data = {}
+                self._refresh_profile_breakdown()
+            except Exception:
+                pass
 
             self.open_positions = calculate_open_positions(matches, trades_by_id)
             self.filtered_open_positions = self._filter_open_positions(self.open_positions)
@@ -960,6 +1195,7 @@ class ReportsTab:
         self.equity_pnl = {}
         self.audit_matches = []
         self.audit_trades_by_id = {}
+        self.profile_breakdown_data = {}
 
         self.profit_label.config(text="₹ +0.00")
         self.loss_label.config(text="₹ -0.00")
@@ -987,6 +1223,9 @@ class ReportsTab:
 
         for item in self.pnl_tree.get_children():
             self.pnl_tree.delete(item)
+
+        if hasattr(self, 'profile_tree'):
+            self.profile_tree.delete(*self.profile_tree.get_children())
 
     def print_report(self) -> None:
         """Generate a print-friendly HTML report."""
@@ -1616,6 +1855,7 @@ class ReportsTab:
         self.show_open_positions_var.set(False)
 
         self.select_all_equities()
+        self.select_all_profiles()
 
         if hasattr(self, 'open_positions_frame'):
             self.open_positions_frame.pack_forget()
@@ -1630,17 +1870,40 @@ class ReportsTab:
         if self.equity_listbox.size() > 0:
             self.equity_listbox.selection_set(0)
 
+    def select_all_profiles(self) -> None:
+        """Select all profiles in the listbox (includes 'All')."""
+        if not hasattr(self, 'profile_listbox'):
+            return
+        self.profile_listbox.selection_clear(0, tk.END)
+        if self.profile_listbox.size() > 0:
+            self.profile_listbox.selection_set(0)
+
     def clear_equity_selection(self) -> None:
         """Clear equity listbox selection."""
         if not hasattr(self, 'equity_listbox'):
             return
         self.equity_listbox.selection_clear(0, tk.END)
 
+    def clear_profile_selection(self) -> None:
+        """Clear profile listbox selection."""
+        if not hasattr(self, 'profile_listbox'):
+            return
+        self.profile_listbox.selection_clear(0, tk.END)
+
     def _get_selected_equities(self) -> list[str] | None:
         """Get selected equities or None for all."""
         if not hasattr(self, 'equity_listbox'):
             return None
         selected = [self.equity_listbox.get(i) for i in self.equity_listbox.curselection()]
+        if not selected or "All" in selected:
+            return None
+        return selected
+
+    def _get_selected_profiles(self) -> list[str] | None:
+        """Get selected profiles or None for all."""
+        if not hasattr(self, 'profile_listbox'):
+            return None
+        selected = [self.profile_listbox.get(i) for i in self.profile_listbox.curselection()]
         if not selected or "All" in selected:
             return None
         return selected
@@ -1659,6 +1922,54 @@ class ReportsTab:
         for idx, equity in enumerate(equities):
             if equity in current:
                 self.equity_listbox.selection_set(idx)
+
+    def _set_profile_listbox_values(self, profiles: list[str]) -> None:
+        """Populate profile listbox while preserving selection when possible."""
+        if not hasattr(self, 'profile_listbox'):
+            return
+        current = set(self._get_selected_profiles() or [])
+        self.profile_listbox.delete(0, tk.END)
+        for profile in profiles:
+            self.profile_listbox.insert(tk.END, profile)
+        if not current:
+            self.select_all_profiles()
+            return
+        for idx, profile in enumerate(profiles):
+            if profile in current:
+                self.profile_listbox.selection_set(idx)
+
+    def _refresh_profile_breakdown(self) -> None:
+        """Refresh the profile breakdown tree based on selected metric."""
+        if not hasattr(self, 'profile_tree'):
+            return
+
+        self.profile_tree.delete(*self.profile_tree.get_children())
+        if not self.profile_breakdown_data:
+            return
+
+        mode = self.profile_breakdown_mode_var.get().strip().lower()
+        if mode.startswith("profit"):
+            metric_key = "profit"
+            heading = "Profit (₹)"
+        elif mode.startswith("loss"):
+            metric_key = "loss"
+            heading = "Loss (₹)"
+        else:
+            metric_key = "net"
+            heading = "Net P/L (₹)"
+
+        self.profile_tree.heading('Value', text=heading)
+
+        rows = sorted(
+            self.profile_breakdown_data.items(),
+            key=lambda item: item[1].get(metric_key, 0),
+            reverse=True
+        )
+        for pname, metrics in rows:
+            self.profile_tree.insert('', 'end', values=(
+                pname,
+                format_money(metrics.get(metric_key, 0))
+            ))
 
     def _filter_open_positions(self, positions: Sequence[OpenPosition]) -> list[OpenPosition]:
         """Filter open positions by Type1 and expiry month."""
