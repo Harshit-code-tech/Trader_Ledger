@@ -92,6 +92,14 @@ class TraderLedgerApp:
         )
         self.profile_button.pack(side='right', padx=(8, 0))
 
+        self.update_button = ttk.Button(
+            self.toolbar,
+            text="Check for Updates",
+            command=self.manual_update_check,
+            width=18
+        )
+        self.update_button.pack(side='right', padx=(8, 0))
+
         # (Profile indicator now in persistent status bar)
 
         self.notebook = ttk.Notebook(self.root)
@@ -368,6 +376,71 @@ class TraderLedgerApp:
         logger.debug(f"Status update: {message}")
         self.status_message_var.set(message)
         self.root.update_idletasks()
+
+    def manual_update_check(self) -> None:
+        """Manually check for updates in a background thread."""
+        self.update_button.config(state='disabled', text="Checking...")
+        self.update_status("Checking for updates...")
+        
+        import threading
+        from core import updater
+        
+        def check():
+            result = updater.check_for_updates()
+            self.root.after(0, lambda: self._on_update_check_complete(result))
+            
+        threading.Thread(target=check, daemon=True).start()
+        
+    def _on_update_check_complete(self, update_info: dict | None) -> None:
+        self.update_button.config(state='normal', text="Check for Updates")
+        
+        if update_info:
+            ver = update_info['version']
+            msg = f"Version {ver} is available!\n\nWould you like to download and install it now?\n\nRelease Notes:\n{update_info.get('release_notes', '')}"
+            if messagebox.askyesno("Update Available", msg):
+                self._start_update_download(update_info['download_url'])
+        else:
+            self.update_status("You are on the latest version.")
+            messagebox.showinfo("No Updates", f"You are currently running the latest version ({config.APP_VERSION}).")
+            
+    def _start_update_download(self, download_url: str) -> None:
+        self.update_button.config(state='disabled', text="Downloading...")
+        self.update_status("Downloading update...")
+        
+        prog_win = tk.Toplevel(self.root)
+        prog_win.title("Downloading Update")
+        prog_win.geometry("400x120")
+        prog_win.transient(self.root)
+        prog_win.grab_set()
+        
+        ttk.Label(prog_win, text="Downloading new version, please wait...").pack(pady=(15, 5))
+        progress = ttk.Progressbar(prog_win, orient='horizontal', length=300, mode='determinate')
+        progress.pack(pady=10)
+        
+        import threading
+        from core import updater
+        
+        def update_progress(downloaded, total):
+            if total > 0:
+                percent = (downloaded / total) * 100
+                self.root.after(0, lambda: progress.config(value=percent))
+                
+        def download_thread():
+            success = updater.download_and_install_update(download_url, update_progress)
+            self.root.after(0, lambda: self._on_download_complete(success, prog_win))
+            
+        threading.Thread(target=download_thread, daemon=True).start()
+        
+    def _on_download_complete(self, success: bool, prog_win: tk.Toplevel) -> None:
+        prog_win.destroy()
+        if success:
+            self.update_status("Update ready. Restarting...")
+            import sys
+            sys.exit(0)
+        else:
+            self.update_button.config(state='normal', text="Check for Updates")
+            self.update_status("Update failed.")
+            messagebox.showerror("Update Error", "Failed to download or run the update. Please check your connection.")
 
     def show_onboarding_if_needed(self) -> None:
         """Show first-run walkthrough unless user has dismissed it."""

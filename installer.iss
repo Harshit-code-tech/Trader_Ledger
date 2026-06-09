@@ -47,9 +47,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; Clean up the old _internal folder so unused libraries from previous versions are deleted
+Type: filesandordirs; Name: "{app}\_internal"
+
 ; What files to copy to user's computer
 [Files]
-Source: "dist\TraderLedger.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\TraderLedger\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "QUICKSTART.md"; DestDir: "{app}"; Flags: ignoreversion
 
