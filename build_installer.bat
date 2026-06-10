@@ -33,7 +33,7 @@ echo.
 echo [Step 4/5] Building executable with PyInstaller...
 pyinstaller --clean --noconfirm TraderLedger.spec
 
-if not exist "dist\TraderLedger.exe" (
+if not exist "dist\TraderLedger\TraderLedger.exe" (
     echo ERROR: Executable build failed!
     pause
     exit /b 1

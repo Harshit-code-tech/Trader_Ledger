@@ -244,8 +244,6 @@ class TraderLedgerApp:
                         # If editing a profile currently in use, just re-apply to update name
                         if pid in self.active_profile_ids or pid == self.primary_profile_id:
                             self._apply_profile_selection(self.active_profile_ids, self.primary_profile_id, new_name if len(self.active_profile_ids) == 1 else "Combined Selected", f"📊 Trader Ledger - {new_name}")
-                            except Exception:
-                                pass
                     except Exception as exc:
                         messagebox.showerror("Error", f"Could not rename profile: {exc}")
 
