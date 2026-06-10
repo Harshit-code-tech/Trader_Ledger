@@ -143,37 +143,65 @@ class TraderLedgerApp:
             list_frame = ttk.Frame(dialog)
             list_frame.pack(fill='both', expand=True, padx=12, pady=6)
 
-            # Using MULTIPLE select mode to allow combining specific profiles
-            profiles_listbox = tk.Listbox(list_frame, height=8, selectmode=tk.MULTIPLE)
-            profiles_listbox.pack(side='left', fill='both', expand=True)
-            scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=profiles_listbox.yview)
-            scrollbar.pack(side='right', fill='y')
-            profiles_listbox.config(yscrollcommand=scrollbar.set)
+            # Create a Canvas and a Scrollbar for scrollable checkboxes
+            canvas = tk.Canvas(list_frame, highlightthickness=0)
+            scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+
+            profile_vars = {}  # pid -> (BooleanVar, name)
 
             def load_profiles():
-                profiles_listbox.delete(0, tk.END)
+                # Clear existing widgets
+                for widget in scrollable_frame.winfo_children():
+                    widget.destroy()
+                profile_vars.clear()
+
                 try:
                     rows = db_operations.get_active_profiles()
-                    for r in rows:
-                        profiles_listbox.insert(tk.END, f"{r[0]}: {r[1]}")
+                    if not rows:
+                        rows = [(1, "Baba")]
                 except Exception:
-                    profiles_listbox.insert(tk.END, "1: Baba")
+                    rows = [(1, "Baba")]
 
-            load_profiles()
+                for r in rows:
+                    pid = r[0]
+                    pname = r[1]
+                    var = tk.BooleanVar(value=False)
+                    profile_vars[pid] = (var, pname)
+
+                    row_frame = ttk.Frame(scrollable_frame)
+                    row_frame.pack(fill='x', pady=2, padx=5)
+
+                    cb = ttk.Checkbutton(row_frame, text=f"{pid}: {pname}", variable=var)
+                    cb.pack(side='left', padx=(0, 10))
+
+                    edit_btn = ttk.Button(row_frame, text="Edit", width=6, command=lambda p=pid, n=pname: edit_profile(p, n))
+                    edit_btn.pack(side='right', padx=2)
+
+                    del_btn = ttk.Button(row_frame, text="Delete", width=8, command=lambda p=pid, n=pname: delete_profile(p, n))
+                    del_btn.pack(side='right', padx=2)
 
             def select_profile():
-                sel = profiles_listbox.curselection()
-                if not sel:
-                    messagebox.showwarning("No selection", "Please select at least one profile.")
-                    return
-                
                 active_ids = []
                 names = []
-                for idx in sel:
-                    text = profiles_listbox.get(idx)
-                    pid_str, pname = text.split(':', 1)
-                    active_ids.append(int(pid_str.strip()))
-                    names.append(pname.strip())
+                for pid, (var, pname) in profile_vars.items():
+                    if var.get():
+                        active_ids.append(pid)
+                        names.append(pname)
+                        
+                if not active_ids:
+                    messagebox.showwarning("No selection", "Please check at least one profile.")
+                    return
                     
                 if len(active_ids) == 1:
                     primary_id = active_ids[0]
@@ -213,25 +241,7 @@ class TraderLedgerApp:
                 name_entry.pack(padx=12, pady=(0, 12))
                 ttk.Button(add_dialog, text="Create", command=create_profile).pack(pady=(0, 12))
 
-            # Buttons
-            btn_frame = ttk.Frame(dialog)
-            btn_frame.pack(pady=8)
-            ttk.Button(btn_frame, text="Select", command=select_profile, width=12).pack(side='left', padx=6)
-            ttk.Button(btn_frame, text="Add New Profile", command=add_profile_flow, width=16).pack(side='left', padx=6)
-            ttk.Button(btn_frame, text="Edit", command=lambda: edit_profile(), width=10).pack(side='left', padx=6)
-            ttk.Button(btn_frame, text="Delete", command=lambda: delete_profile(), width=10).pack(side='left', padx=6)
-            ttk.Button(btn_frame, text="Combined Family View", command=select_combined, width=22).pack(side='left', padx=6)
-
-            def edit_profile():
-                sel = profiles_listbox.curselection()
-                if not sel:
-                    messagebox.showwarning("No selection", "Please select a profile to edit.")
-                    return
-                text = profiles_listbox.get(sel[0])
-                pid_str, pname = text.split(':', 1)
-                pid = int(pid_str.strip())
-                pname = pname.strip()
-
+            def edit_profile(pid: int, pname: str):
                 def do_update():
                     new_name = edit_entry.get().strip()
                     if not new_name:
@@ -241,7 +251,6 @@ class TraderLedgerApp:
                         db_operations.update_profile(pid, new_name)
                         load_profiles()
                         edit_dialog.destroy()
-                        # If editing a profile currently in use, just re-apply to update name
                         if pid in self.active_profile_ids or pid == self.primary_profile_id:
                             self._apply_profile_selection(self.active_profile_ids, self.primary_profile_id, new_name if len(self.active_profile_ids) == 1 else "Combined Selected", f"📊 Trader Ledger - {new_name}")
                     except Exception as exc:
@@ -257,20 +266,11 @@ class TraderLedgerApp:
                 edit_entry.pack(padx=12, pady=(0, 12))
                 ttk.Button(edit_dialog, text="Save", command=do_update).pack(pady=(0, 12))
 
-            def delete_profile():
-                sel = profiles_listbox.curselection()
-                if not sel:
-                    messagebox.showwarning("No selection", "Please select a profile to delete.")
-                    return
-                text = profiles_listbox.get(sel[0])
-                pid_str, pname = text.split(':', 1)
-                pid = int(pid_str.strip())
-                pname = pname.strip()
+            def delete_profile(pid: int, pname: str):
                 if messagebox.askyesno("Confirm Delete", f"Disable profile '{pname}'? This will hide it from selectors."):
                     try:
                         db_operations.delete_profile(pid)
                         load_profiles()
-                        # If deleting current profile, clear persisted state
                         if pid in self.active_profile_ids or pid == self.primary_profile_id:
                             try:
                                 state_path = config.PROFILE_STATE_FILE
@@ -287,6 +287,15 @@ class TraderLedgerApp:
                             self.profile_status_var.set("Profile: (not selected)")
                     except Exception as exc:
                         messagebox.showerror("Error", f"Could not delete profile: {exc}")
+
+            load_profiles()
+
+            # Buttons
+            btn_frame = ttk.Frame(dialog)
+            btn_frame.pack(pady=8)
+            ttk.Button(btn_frame, text="Select Checked Profiles", command=select_profile, width=22).pack(side='left', padx=6)
+            ttk.Button(btn_frame, text="Add New Profile", command=add_profile_flow, width=16).pack(side='left', padx=6)
+            ttk.Button(btn_frame, text="Combined Family View (All)", command=select_combined, width=26).pack(side='left', padx=6)
 
             def close_dialog() -> None:
                 if self.primary_profile_id is None and not self.active_profile_ids and self.current_profile_name != "Combined Family":

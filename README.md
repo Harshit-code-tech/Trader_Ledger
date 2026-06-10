@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
+[![Version](https://img.shields.io/badge/version-1.4.4-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -28,16 +28,15 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Offline First** - Works completely offline with all data stored locally
 - ✅ **Clean UI** - User-friendly Tkinter interface with calendar date picker and data validation
 
-## 🆕 What's New in v1.3
+## 🆕 What's New in v1.4.3
 
-Version 1.3 brings reliability, profile-management, and reporting improvements:
+Version 1.4.3 brings multi-profile filtering, native Intraday (MIS) short-selling support, blazing fast lazy-loading, and a seamless background updater.
 
-- **Integrated Tracing**: Added optional `blackbox_recorder` tracing and saved trace reports to `logs/` for easier debugging and auditability.
-- **Persistent Profile Selection**: The selected profile now persists between sessions and updates all tabs immediately when changed.
-- **Profile-aware Inserts**: All trade INSERTs and CSV imports now include `profile_id` to avoid NOT NULL constraint errors and reduce DB locking issues.
-- **Combined Profile Reports**: Combined-family reports correctly aggregate across selected profiles; added a profiles multi-select and a breakdown dropdown (Net / Profit / Loss).
-- **UI Improvements**: Profile selector dialog is resizable; fields and lists refresh immediately after profile changes; prevented saving/import when in Combined view to avoid ambiguous profile attribution.
-- **Packaging/Dependencies**: `blackbox-recorder` added to `requirements.txt` and PyInstaller spec for optional tracing in builds.
+- **Multi-Profile Selection**: Select multiple profiles at once in Reports and Trade Views to get a combined dashboard of their trades.
+- **Intraday Short-Selling**: The FIFO engine now elegantly handles Intraday `BUY` and `SELL` matching natively, allowing you to short-sell (Sell first, Buy later) without triggering Oversell errors as long as trades occur on the same day.
+- **Blazing Fast Startup**: Heavy data grids and report logic are now lazy-loaded in the background. The app opens instantly.
+- **Seamless Background Updates**: `updater.py` automatically checks GitHub for updates and silently installs them in the background using Inno Setup's silent flags, completely invisible to the user!
+- **Integrated Tracing (v1.3)**: Added optional `blackbox_recorder` tracing and saved trace reports to `logs/` for easier debugging and auditability.
 
 👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
 👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details

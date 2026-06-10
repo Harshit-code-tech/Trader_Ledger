@@ -232,23 +232,12 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
     for trade in trades:
         trade_date = trade[1]
         
-        # Enforce Intraday End-of-Day Square-off
+        # Check for date change (previously used for Intraday square-off validation)
         if current_date and trade_date != current_date:
-            for ckey, queue in buy_queues.items():
-                if ckey[1] == 'intraday':
-                    rem = sum(item['remaining_quantity'] for item in queue)
-                    if rem > 0:
-                        raise FifoMatchError(
-                            f"\n{'='*60}\n"
-                            f"INTRADAY POSITION NOT SQUARED OFF\n"
-                            f"{'='*60}\n"
-                            f"Date: {current_date}\n"
-                            f"Equity: {ckey[0]}\n"
-                            f"Remaining unsell quantity: {rem}\n"
-                            f"\n💡 Intraday trades must be closed on the same day.\n"
-                            f"{'='*60}"
-                        )
-        current_date = trade_date
+            current_date = trade_date
+        elif not current_date:
+            current_date = trade_date
+            
         (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
          quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
         
@@ -323,22 +312,8 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                 if oldest_buy['remaining_quantity'] == 0:
                     buy_queue.pop(0)
     
-    # Check Intraday square-off for the very last date processed
-    if current_date:
-        for ckey, queue in buy_queues.items():
-            if ckey[1] == 'intraday':
-                rem = sum(item['remaining_quantity'] for item in queue)
-                if rem > 0:
-                    raise FifoMatchError(
-                        f"\n{'='*60}\n"
-                        f"INTRADAY POSITION NOT SQUARED OFF\n"
-                        f"{'='*60}\n"
-                        f"Date: {current_date}\n"
-                        f"Equity: {ckey[0]}\n"
-                        f"Remaining unsell quantity: {rem}\n"
-                        f"\n💡 Intraday trades must be closed on the same day.\n"
-                        f"{'='*60}"
-                    )
+    # Intraday trades can remain open if they are pending square-off.
+    # No strict error is raised here to allow users to add closing trades later.
 
     if collect_matches:
         return matches

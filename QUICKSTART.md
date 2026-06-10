@@ -118,4 +118,4 @@ Check the log file: `logs/trader_ledger.log`
 
 ---
 
-**Version 1.2.0** - Ready for daily use
+**Version 1.4.4** - Ready for daily use
