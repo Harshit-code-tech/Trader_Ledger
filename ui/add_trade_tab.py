@@ -582,45 +582,19 @@ class AddTradeTab:
     
     def create_recent_trades_table(self, parent: ttk.Frame, row: int) -> None:
         """Create table showing last 5 trades. Display-only, no logic."""
+        from ui.widgets import create_treeview
         
-        # Create treeview frame
-        tree_frame = ttk.Frame(parent)
+        columns = [
+            ('Date', 'Date', 100, 'center'),
+            ('Stock', 'Stock', 80, 'center'),
+            ('Type', 'Type', 60, 'center'),
+            ('Qty', 'Qty', 60, 'center'),
+            ('Price', 'Price', 100, 'e'),
+            ('Total', 'Total', 120, 'e')
+        ]
+        
+        tree_frame, self.recent_tree = create_treeview(parent, columns, height=5)
         tree_frame.grid(row=row, column=0, columnspan=4, sticky='nsew', pady=5)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(tree_frame)
-        scrollbar.pack(side='right', fill='y')
-        
-        # Treeview
-        columns = ('Date', 'Stock', 'Type', 'Qty', 'Price', 'Total')
-        self.recent_tree = ttk.Treeview(
-            tree_frame,
-            columns=columns,
-            show='headings',
-            height=5,
-            yscrollcommand=scrollbar.set
-        )
-        scrollbar.config(command=self.recent_tree.yview)
-        
-        # Configure columns
-        self.recent_tree.heading('Date', text='Date')
-        self.recent_tree.heading('Stock', text='Stock')
-        self.recent_tree.heading('Type', text='Type')
-        self.recent_tree.heading('Qty', text='Qty')
-        self.recent_tree.heading('Price', text='Price')
-        self.recent_tree.heading('Total', text='Total')
-        
-        self.recent_tree.column('Date', width=100, anchor='center')
-        self.recent_tree.column('Stock', width=80, anchor='center')
-        self.recent_tree.column('Type', width=60, anchor='center')
-        self.recent_tree.column('Qty', width=60, anchor='center')
-        self.recent_tree.column('Price', width=100, anchor='e')
-        self.recent_tree.column('Total', width=120, anchor='e')
-        
-        # Add mousewheel scrolling
-        self.recent_tree.bind('<MouseWheel>', lambda e: self.recent_tree.yview_scroll(int(-1*(e.delta/120)), "units"))
-        
-        self.recent_tree.pack(fill='both', expand=True)
         
         # Note about Total column (display-only)
         note = ttk.Label(
@@ -635,18 +609,10 @@ class AddTradeTab:
         self.refresh_recent_trades()
     
     def load_equity_dropdown(self) -> None:
-        """Load unique equity symbols from database for autocomplete."""
+        """Load unique equity symbols from database for autocomplete using DB layer."""
         try:
-            conn = sqlite3.connect(str(config.DB_PATH))
-            c = conn.cursor()
-            # Filter equities by current profile if set (0 => combined view)
-            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
-                c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 ORDER BY equity")
-            else:
-                c.execute("SELECT DISTINCT equity FROM trade_events WHERE is_active = 1 AND profile_id = ? ORDER BY equity", (config.CURRENT_PROFILE_ID,))
-            equities = [row[0] for row in c.fetchall()]
-            conn.close()
-
+            from core.db_operations import get_unique_equities
+            equities = get_unique_equities(config.CURRENT_PROFILE_ID)
             self.equity_values = equities
             self.equity_entry['values'] = equities
             logger.debug(f"Loaded {len(equities)} unique equities for dropdown")
@@ -672,13 +638,7 @@ class AddTradeTab:
         self.equity_entry.focus_set()
         self.equity_entry.icursor(cursor_pos)
     
-    def validate_inputs(self) -> tuple[bool, str]:
-        """
-        Validate all input fields.
-        Returns (is_valid, error_message).
-        """
-        
-        # Check date format
+    def _gather_form_data(self) -> dict:
         if CALENDAR_AVAILABLE:
             try:
                 date_str = self.date_entry.get_date().strftime('%d-%m-%Y')
@@ -686,299 +646,93 @@ class AddTradeTab:
                 date_str = self.date_entry.get().strip()
         else:
             date_str = self.date_entry.get().strip()
+            
+        type1, type2, strike, expiry = self.get_classification_inputs()
         
-        if not date_str:
-            logger.warning("Validation failed: Date is empty")
-            return False, "Date is required"
-        
-        try:
-            # Parse DD-MM-YYYY format
-            day, month, year = date_str.split('-')
-            _ = date(int(year), int(month), int(day))  # Validates the date
-        except (ValueError, IndexError) as e:
-            logger.warning(f"Validation failed: Invalid date format '{date_str}' - {str(e)}")
-            return False, "Invalid date format. Use DD-MM-YYYY"
-        
-        # Check equity
-        equity = self.equity_entry.get().strip()
-        if not equity:
-            logger.warning("Validation failed: Stock symbol is empty")
-            return False, "Stock symbol is required"
-        
-        # Check quantity
-        try:
-            quantity = int(self.quantity_entry.get())
-            if quantity <= 0:
-                logger.warning(f"Validation failed: Invalid quantity {quantity}")
-                return False, "Quantity must be positive"
-        except ValueError as e:
-            logger.warning(f"Validation failed: Quantity is not a number - {str(e)}")
-            return False, "Quantity must be a number"
-        
-        # Check price
-        try:
-            price = float(self.price_entry.get())
-            if price <= 0:
-                logger.warning(f"Validation failed: Invalid price {price}")
-                return False, "Price must be positive"
-        except ValueError as e:
-            logger.warning(f"Validation failed: Price is not a number - {str(e)}")
-            return False, "Price must be a number"
-        
-        # Check brokerage
-        try:
-            brokerage = float(self.brokerage_entry.get())
-            if brokerage < 0:
-                logger.warning(f"Validation failed: Negative brokerage {brokerage}")
-                return False, "Brokerage cannot be negative"
-        except ValueError as e:
-            logger.warning(f"Validation failed: Brokerage is not a number - {str(e)}")
-            return False, "Brokerage must be a number"
+        return {
+            'date_str': date_str,
+            'equity': self.equity_entry.get().strip(),
+            'trade_type': self.trade_type_var.get().strip().upper(),
+            'quantity': self.quantity_entry.get(),
+            'price': self.price_entry.get(),
+            'brokerage': self.brokerage_entry.get(),
+            'override_brokerage': self.override_brokerage_var.get(),
+            'classification': (type1, type2, strike, expiry),
+            'mtf_amount': self.mtf_amount_entry.get().strip(),
+            'selected_sell_reference': self._get_selected_sell_reference(),
+            'sell_reference_meta': self.sell_reference_meta,
+            'notes': self.notes_entry.get('1.0', 'end-1c').strip()
+        }
 
-        # Require override when brokerage auto is not configured
-        type1_norm = self.type1_var.get().strip().lower()
-        trade_type = self.trade_type_var.get().strip().upper()
-        if not self.override_brokerage_var.get():
-            try:
-                _auto_brokerage, _rate_ppm = calculate_brokerage_auto(quantity, int(float(self.price_entry.get()) * 100), type1_norm, trade_type)
-            except Exception:
-                return False, (
-                    f"Auto brokerage not configured for {type1_norm.upper()} {trade_type}. "
-                    "Enable override and enter brokerage manually."
-                )
-
-        # MTF amount validation (BUY + MTF only)
-        if type1_norm == 'mtf' and self.trade_type_var.get() == 'BUY':
-            try:
-                mtf_amount = float(self.mtf_amount_entry.get().strip() or 0)
-            except ValueError:
-                return False, "MTF amount must be a number"
-            if mtf_amount <= 0:
-                return False, "MTF amount is required for MTF BUY trades"
-            trade_amount = quantity * int(float(self.price_entry.get()) * 100)
-            if int(mtf_amount * 100) > trade_amount:
-                return False, "MTF amount cannot exceed buy trade amount"
-
-        # Validate Type1/Type2/Strike/Expiry
-        try:
-            type1, type2, strike, expiry = self.get_classification_inputs()
-            normalize_trade_classification(
-                type1,
-                type2,
-                strike,
-                expiry,
-                require_type1=True
-            )
-        except ValueError as exc:
-            logger.warning(f"Validation failed: {str(exc)}")
-            return False, str(exc)
-
-        # Enforce SELL reference selection and quantity cap against selected lot
-        if self.trade_type_var.get() == 'SELL':
-            if not self.sell_reference_meta:
-                logger.warning("Validation failed: No open BUY lots available for selected SELL contract")
-                return False, "No open BUY lots available for this contract. Add BUY first or adjust contract details."
-
-            selected_reference = self._get_selected_sell_reference()
-            if not selected_reference:
-                logger.warning("Validation failed: SELL reference not selected")
-                return False, "Select 'Sell Against' BUY lot for this SELL trade."
-
-            selected_remaining = selected_reference['remaining_qty']
-            if quantity > selected_remaining:
-                logger.warning(
-                    f"Validation failed: SELL quantity {quantity} exceeds selected lot remaining {selected_remaining}"
-                )
-                return False, (
-                    f"SELL quantity ({quantity}) exceeds selected BUY lot remaining quantity "
-                    f"({selected_remaining})."
-                )
-        
-        logger.debug("Input validation passed")
-        return True, ""
-    
     def save_trade(self) -> None:
-        """Save trade to database."""
+        """Save trade to database using Trade Manager."""
+        from core import trade_manager
         
-        # Validate inputs
-        is_valid, error_msg = self.validate_inputs()
+        data = self._gather_form_data()
+        
+        is_valid, error_msg = trade_manager.validate_trade_data(data)
         if not is_valid:
             messagebox.showerror("Invalid Input", error_msg)
             return
-        
+            
         try:
-            # Get and normalize values
-            if CALENDAR_AVAILABLE:
-                try:
-                    date_str = self.date_entry.get_date().strftime('%d-%m-%Y')
-                except:
-                    date_str = self.date_entry.get().strip()
-            else:
-                date_str = self.date_entry.get().strip()
+            profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
+        except Exception:
+            profile_id = None
             
-            day, month, year = date_str.split('-')
-            trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"  # Convert to YYYY-MM-DD
+        if profile_id == 0:
+            messagebox.showwarning("Select Profile", "Combined Family view cannot save trades. Select a profile first.")
+            return
             
-            equity = self.equity_entry.get().strip().upper()  # Normalize
-            trade_type = self.trade_type_var.get()
-            quantity = int(self.quantity_entry.get())
+        if profile_id is None:
+            profile_id = 1 # Fallback
             
-            # Convert ₹ → paise
-            price_rupees = float(self.price_entry.get())
-            price_paise = int(price_rupees * 100)
-
-            type1_norm = self.type1_var.get().strip().lower()
-            if self.override_brokerage_var.get():
-                brokerage_rupees = float(self.brokerage_entry.get())
-                brokerage_paise = int(brokerage_rupees * 100)
-                brokerage_auto = 0
-                brokerage_override = brokerage_paise
-            else:
-                brokerage_paise, _rate_ppm = calculate_brokerage_auto(quantity, price_paise, type1_norm, trade_type)
-                brokerage_auto = brokerage_paise
-                brokerage_override = None
+        try:
+            trade_id = trade_manager.save_trade(data, profile_id)
+            trade_type = data['trade_type']
+            quantity = data['quantity']
+            equity = data['equity'].upper()
+            price = data['price']
             
-            notes = self.notes_entry.get('1.0', 'end-1c').strip()
-
-            type1_in, type2_in, strike_in, expiry_in = self.get_classification_inputs()
-            type1, type2, strike, expiry = normalize_trade_classification(
-                type1_in,
-                type2_in,
-                strike_in,
-                expiry_in,
-                require_type1=True
-            )
-            
-            # Normalize equity (uppercase, strip spaces)
-            equity = equity.strip().upper()
-
-            if trade_type == 'SELL':
-                selected_reference = self._get_selected_sell_reference()
-                if selected_reference:
-                    ref_note = (
-                        f"[SELL_REF buy_id={selected_reference['buy_id']} "
-                        f"remaining_at_entry={selected_reference['remaining_qty']}]"
-                    )
-                    notes = f"{notes}\n{ref_note}" if notes else ref_note
-            
-            logger.info(f"Preparing to save trade: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f} on {date_str}")
-            logger.debug(f"Trade details - Date: {trade_date}, Equity: {equity}, Type: {trade_type}, Qty: {quantity}, Price: {price_paise} paise, Brokerage: {brokerage_paise} paise")
-            
-            mtf_amount_paise = 0
-            if type1 == 'mtf' and trade_type == 'BUY':
-                mtf_amount_rupees = float(self.mtf_amount_entry.get().strip() or 0)
-                mtf_amount_paise = int(mtf_amount_rupees * 100)
-
-            trade_ts = make_trade_ts(trade_date)
-
-            try:
-                profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
-            except Exception:
-                profile_id = None
-            if profile_id == 0:
-                messagebox.showwarning(
-                    "Select Profile",
-                    "Combined Family view cannot save trades. Select a profile first."
-                )
-                return
-
-            # Insert into database
-            logger.debug(f"Connecting to database: {config.DB_PATH}")
-            with sqlite3.connect(str(config.DB_PATH), timeout=10) as conn:
-                conn.execute("PRAGMA foreign_keys = ON")
-                c = conn.cursor()
-                if profile_id is None:
-                    c.execute("SELECT id FROM profiles WHERE profile_name = ?", ("Baba",))
-                    r = c.fetchone()
-                    profile_id = r[0] if r else 1
-
-                c.execute("""
-                    INSERT INTO trade_events (
-                        trade_date, equity, trade_type, quantity, price, brokerage,
-                        brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
-                        type1, type2, strike, expiry, is_active, profile_id
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                """, (
-                    trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                    brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
-                    type1, type2, strike, expiry, profile_id
-                ))
-                trade_id = c.lastrowid
-            
-            # Success
-            logger.info(f"✅ Trade saved successfully - ID: {trade_id}, {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
-            self.update_status(f"✅ Trade saved: {trade_type} {quantity} {equity} @ ₹{price_rupees:.2f}")
+            logger.info(f"✅ Trade saved successfully - ID: {trade_id}")
+            self.update_status(f"✅ Trade saved: {trade_type} {quantity} {equity} @ ₹{price}")
             messagebox.showinfo("Success", f"Trade saved successfully!\n\n{trade_type} {quantity} {equity}")
             
-            # Refresh and clear
-            logger.debug("Refreshing recent trades display and clearing form")
             self.refresh_recent_trades()
             self.load_equity_dropdown()
             self.clear_form()
-            
         except Exception as e:
             logger.error(f"❌ Failed to save trade: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to save trade:\n{str(e)}")
             self.update_status(f"❌ Error saving trade")
-    
+
     def refresh_recent_trades(self) -> None:
-        """Load last 5 trades for display. Total column is display-only."""
-        
+        """Load last 5 trades for display using Trade Manager."""
         logger.debug("Refreshing recent trades display")
         
-        # Clear existing items
         for item in self.recent_tree.get_children():
             self.recent_tree.delete(item)
-        
-        try:
-            conn = sqlite3.connect(str(config.DB_PATH))
-            c = conn.cursor()
-            # Apply profile filter if set (0 => combined view)
-            params = []
-            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
-                c.execute("""
-                    SELECT trade_date, equity, trade_type, quantity, price, brokerage
-                    FROM trade_events
-                    WHERE is_active = 1
-                    ORDER BY id DESC
-                    LIMIT 5
-                """)
-            else:
-                c.execute("""
-                    SELECT trade_date, equity, trade_type, quantity, price, brokerage
-                    FROM trade_events
-                    WHERE is_active = 1 AND profile_id = ?
-                    ORDER BY id DESC
-                    LIMIT 5
-                """, (config.CURRENT_PROFILE_ID,))
-            trades = c.fetchall()
-            conn.close()
             
-            logger.debug(f"Loaded {len(trades)} recent trades from database")
+        from core import trade_manager
+        try:
+            trades = trade_manager.get_recent_trades(config.CURRENT_PROFILE_ID)
             
             for trade in trades:
                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise = trade
                 
-                # DISPLAY-ONLY calculation (NOT used in engine)
                 if trade_type == 'BUY':
                     total_paise = (quantity * price_paise) + brokerage_paise
                 else:  # SELL
                     total_paise = (quantity * price_paise) - brokerage_paise
-                
-                # Format date DD-MM-YYYY
+                    
                 year, month, day = trade_date.split('-')
                 display_date = f"{day}-{month}-{year}"
                 
+                from core.utils import format_money
                 self.recent_tree.insert('', 'end', values=(
-                    display_date,
-                    equity,
-                    trade_type,
-                    quantity,
-                    format_money(price_paise),
-                    format_money(total_paise)  # Display-only total
+                    display_date, equity, trade_type, quantity,
+                    format_money(price_paise), format_money(total_paise)
                 ))
-        
         except Exception as e:
             self.update_status(f"⚠️ Could not load recent trades: {str(e)}")
     

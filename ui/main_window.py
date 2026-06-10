@@ -9,10 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import json
 from pathlib import Path
-from ui.add_trade_tab import AddTradeTab
-from ui.view_records_tab import ViewRecordsTab
-from ui.reports_tab import ReportsTab
-from ui.trade_view_tab import TradeViewTab
+
 from core.logger import get_logger
 import config
 
@@ -116,8 +113,8 @@ class TraderLedgerApp:
     def show_profile_selector(self) -> None:
         """Modal dialog to select or create a profile at startup."""
         try:
-            import sqlite3
             import config
+            from core import db_operations
 
             # Modal dialog
             dialog = tk.Toplevel(self.root)
@@ -143,11 +140,7 @@ class TraderLedgerApp:
             def load_profiles():
                 profiles_listbox.delete(0, tk.END)
                 try:
-                    conn = sqlite3.connect(str(config.DB_PATH))
-                    cur = conn.cursor()
-                    cur.execute("SELECT id, profile_name FROM profiles WHERE is_active = 1 ORDER BY profile_name")
-                    rows = cur.fetchall()
-                    conn.close()
+                    rows = db_operations.get_active_profiles()
                     for r in rows:
                         profiles_listbox.insert(tk.END, f"{r[0]}: {r[1]}")
                 except Exception:
@@ -180,11 +173,7 @@ class TraderLedgerApp:
                         messagebox.showwarning("Invalid", "Profile name required")
                         return
                     try:
-                        conn = sqlite3.connect(str(config.DB_PATH))
-                        cur = conn.cursor()
-                        cur.execute("INSERT INTO profiles (profile_name, is_active) VALUES (?, 1)", (name,))
-                        conn.commit()
-                        conn.close()
+                        db_operations.create_profile(name)
                         load_profiles()
                         add_dialog.destroy()
                     except Exception as exc:
@@ -224,11 +213,7 @@ class TraderLedgerApp:
                         messagebox.showwarning("Invalid", "Profile name required")
                         return
                     try:
-                        conn = sqlite3.connect(str(config.DB_PATH))
-                        cur = conn.cursor()
-                        cur.execute("UPDATE profiles SET profile_name = ? WHERE id = ?", (new_name, pid))
-                        conn.commit()
-                        conn.close()
+                        db_operations.update_profile(pid, new_name)
                         load_profiles()
                         edit_dialog.destroy()
                         # If editing current selected profile, update persisted state and UI
@@ -264,11 +249,7 @@ class TraderLedgerApp:
                 pname = pname.strip()
                 if messagebox.askyesno("Confirm Delete", f"Disable profile '{pname}'? This will hide it from selectors."):
                     try:
-                        conn = sqlite3.connect(str(config.DB_PATH))
-                        cur = conn.cursor()
-                        cur.execute("UPDATE profiles SET is_active = 0 WHERE id = ?", (pid,))
-                        conn.commit()
-                        conn.close()
+                        db_operations.delete_profile(pid)
                         load_profiles()
                         # If deleting current profile, clear persisted state
                         if self.current_profile_id == pid:
@@ -336,40 +317,59 @@ class TraderLedgerApp:
         self.update_status(f"Profile updated: {display_name}")
     
     def create_tabs(self) -> None:
-        """Create all tabs. Phase 3: All tabs functional."""
+        """Create all tabs and lazily load them for fast startup."""
         
-        # Tab 1: Add Trade (Phase 1 - functional)
-        add_trade_frame = ttk.Frame(self.notebook)
-        self.notebook.add(add_trade_frame, text="  Add Trade  ")
-        self.add_trade_tab = AddTradeTab(add_trade_frame, self.update_status)
+        # Tab 1: Add Trade - Load immediately
+        self.add_trade_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.add_trade_frame, text="  Add Trade  ")
+        from ui.add_trade_tab import AddTradeTab
+        self.add_trade_tab = AddTradeTab(self.add_trade_frame, self.update_status)
         
-        # Tab 2: View Records (Phase 2 - functional)
-        view_records_frame = ttk.Frame(self.notebook)
-        self.notebook.add(view_records_frame, text="  View Records  ")
-        self.view_records_tab = ViewRecordsTab(view_records_frame, self.update_status)
+        # Tab 2: View Records - Lazy load
+        self.view_records_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.view_records_frame, text="  View Records  ")
         
-        # Tab 3: Reports (Phase 3 - functional)
-        reports_frame = ttk.Frame(self.notebook)
-        self.notebook.add(reports_frame, text="  Reports  ")
-        self.reports_tab = ReportsTab(reports_frame, self.update_status)
+        # Tab 3: Reports - Lazy load
+        self.reports_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.reports_frame, text="  Reports  ")
 
-        # Tab 4: Trade View (Grouped trade units)
-        trade_view_frame = ttk.Frame(self.notebook)
-        self.notebook.add(trade_view_frame, text="  Trade View  ")
-        self.trade_view_tab = TradeViewTab(trade_view_frame, self.update_status)
+        # Tab 4: Trade View - Lazy load
+        self.trade_view_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.trade_view_frame, text="  Trade View  ")
     
     def on_tab_changed(self, event: tk.Event) -> None:  # type: ignore
-        """Handle tab selection changes."""
+        """Handle tab selection changes and lazy load tabs."""
         selected_tab = self.notebook.select()
         tab_index = self.notebook.index(selected_tab)
         
-        # If Reports tab is selected, trigger recalculation
-        if tab_index == 2:  # Reports is the 3rd tab (index 2)
-            logger.debug("Reports tab selected - triggering recalculation")
-            self.reports_tab.on_tab_selected()
-        if tab_index == 3:  # Trade View
-            logger.debug("Trade View tab selected - refreshing units")
-            self.trade_view_tab.refresh_units()
+        if tab_index == 1 and not hasattr(self, 'view_records_tab'):
+            self.update_status("Loading View Records...")
+            self.root.update_idletasks()
+            from ui.view_records_tab import ViewRecordsTab
+            self.view_records_tab = ViewRecordsTab(self.view_records_frame, self.update_status)
+            self.update_status("Ready")
+            
+        elif tab_index == 2:
+            if not hasattr(self, 'reports_tab'):
+                self.update_status("Loading Reports...")
+                self.root.update_idletasks()
+                from ui.reports_tab import ReportsTab
+                self.reports_tab = ReportsTab(self.reports_frame, self.update_status)
+                self.update_status("Ready")
+            else:
+                logger.debug("Reports tab selected - triggering recalculation")
+                self.reports_tab.on_tab_selected()
+                
+        elif tab_index == 3:
+            if not hasattr(self, 'trade_view_tab'):
+                self.update_status("Loading Trade View...")
+                self.root.update_idletasks()
+                from ui.trade_view_tab import TradeViewTab
+                self.trade_view_tab = TradeViewTab(self.trade_view_frame, self.update_status)
+                self.update_status("Ready")
+            else:
+                logger.debug("Trade View tab selected - refreshing units")
+                self.trade_view_tab.refresh_units()
     
     def update_status(self, message: str) -> None:
         """Update status bar message."""

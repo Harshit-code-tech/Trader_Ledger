@@ -47,40 +47,7 @@ from core.allocations import round_divide
 logger = get_logger('ui.reports_tab')
 
 
-class Tooltip:
-    """Lightweight tooltip for Tk widgets."""
-
-    def __init__(self, widget: tk.Widget, text: str) -> None:
-        self.widget = widget
-        self.text = text
-        self.tip_window: tk.Toplevel | None = None
-        self.widget.bind("<Enter>", self._show)
-        self.widget.bind("<Leave>", self._hide)
-
-    def _show(self, _event: tk.Event) -> None:
-        if self.tip_window or not self.text:
-            return
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + 20
-        self.tip_window = tk.Toplevel(self.widget)
-        self.tip_window.wm_overrideredirect(True)
-        self.tip_window.wm_geometry(f"+{x}+{y}")
-        label = ttk.Label(
-            self.tip_window,
-            text=self.text,
-            background="#f4f6f8",
-            foreground="#2c3e50",
-            relief="solid",
-            borderwidth=1,
-            padding=(6, 3)
-        )
-        label.pack()
-
-    def _hide(self, _event: tk.Event) -> None:
-        if self.tip_window:
-            self.tip_window.destroy()
-            self.tip_window = None
-
+from ui.widgets import Tooltip
 
 class ReportsTab:
     """Reports tab - display P/L analysis with FIFO-based calculations."""
@@ -778,23 +745,16 @@ class ReportsTab:
             combined_matches: list = []
 
             try:
-                conn = sqlite3.connect(str(config.DB_PATH))
-                cur = conn.cursor()
-                cur.execute("SELECT profile_name FROM profiles WHERE is_active = 1 ORDER BY profile_name")
-                profile_names = [row[0] for row in cur.fetchall()]
-                conn.close()
+                from core import db_operations
+                profiles = db_operations.get_active_profiles()
+                profile_names = [p[1] for p in profiles]
                 self._set_profile_listbox_values(["All"] + profile_names)
             except Exception:
                 pass
 
             # If Combined Family view selected (0), compute per-profile and aggregate
             if _config.CURRENT_PROFILE_ID == 0:
-                # Load active profiles
-                conn = sqlite3.connect(str(config.DB_PATH))
-                cur = conn.cursor()
-                cur.execute("SELECT id, profile_name FROM profiles WHERE is_active = 1 ORDER BY profile_name")
-                profiles = cur.fetchall()
-                conn.close()
+                profiles = db_operations.get_active_profiles()
 
                 if not profiles:
                     messagebox.showinfo("No Profiles", "No active profiles found in database.")
@@ -987,62 +947,14 @@ class ReportsTab:
             self.net_pnl = self.total_profit + self.total_loss
 
             sell_totals = aggregate_pnl_by_sell(filtered_pnl_results, pnl_field="net_pnl")
-            wins = sum(1 for pnl in sell_totals.values() if pnl > 0)
-            losses = sum(1 for pnl in sell_totals.values() if pnl < 0)
-            total_trades = len(sell_totals)
-            win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
-
-            win_values = [pnl for pnl in sell_totals.values() if pnl > 0]
-            loss_values = [pnl for pnl in sell_totals.values() if pnl < 0]
-            avg_win = float(sum(win_values) / len(win_values)) if win_values else 0
-            avg_loss = float(sum(loss_values) / len(loss_values)) if loss_values else 0
-
-            if losses == 0:
-                win_loss_ratio = "∞" if wins > 0 else "0.00"
-            else:
-                win_loss_ratio = f"{wins / losses:.2f}"
-
-            total_profit_val = sum(win_values)
-            total_loss_abs = abs(sum(loss_values))
-            if total_loss_abs == 0:
-                profit_factor = "∞" if total_profit_val > 0 else "0.00"
-            else:
-                profit_factor = f"{total_profit_val / total_loss_abs:.2f}"
-
-            loss_rate = 1 - (wins / total_trades) if total_trades > 0 else 0.0
-            expectancy = int((avg_win * (win_rate / 100)) + (avg_loss * loss_rate))
-
-            total_qty = 0
-            total_days = 0
-            holding_buckets: list[tuple[int, int]] = []
-            for match in filtered_pnl_results:
-                buy_date = trades_by_id[match['buy_id']]['trade_date']
-                sell_date = trades_by_id[match['sell_id']]['trade_date']
-                days = (datetime.strptime(sell_date, '%Y-%m-%d') - datetime.strptime(buy_date, '%Y-%m-%d')).days
-                qty = match['matched_quantity']
-                total_days += days * qty
-                total_qty += qty
-                holding_buckets.append((days, qty))
-            avg_holding_days = (total_days / total_qty) if total_qty > 0 else 0.0
-            median_holding_days = self._weighted_median(holding_buckets) if holding_buckets else 0.0
-
-            max_drawdown = self._calculate_max_drawdown(daily_pnl_totals)
+            from core.analytics_engine import calculate_advanced_metrics
+            self.analytics = calculate_advanced_metrics(
+                filtered_pnl_results, trades_by_id, sell_totals, daily_pnl_totals
+            )
 
             # Derived trade value metrics (based on matched trades)
             trade_value_by_date = aggregate_trade_value_by_date(filtered_pnl_results, trades_by_id)
             self.analytics['trade_value_by_date'] = trade_value_by_date
-
-            self.analytics = {
-                'win_loss_ratio': win_loss_ratio,
-                'win_rate': win_rate,
-                'avg_win': avg_win,
-                'avg_loss': avg_loss,
-                'profit_factor': profit_factor,
-                'expectancy': expectancy,
-                'avg_holding_days': avg_holding_days,
-                'median_holding_days': median_holding_days,
-                'max_drawdown': max_drawdown
-            }
 
             self.hide_warning_banner()
             self.update_displays()
@@ -1230,181 +1142,20 @@ class ReportsTab:
     def print_report(self) -> None:
         """Generate a print-friendly HTML report."""
         logger.info("Generating print report")
-
         try:
+            from core.exporters import reports_exporter
             import webbrowser
-
-            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = config.EXPORTS_DIR / f"report_{timestamp}.html"
-
-            period_type = self.period_var.get()
-
-            html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>P/L Report - {datetime.now().strftime("%d %b %Y %I:%M %p")}</title>
-    <style>
-        @media print {{
-            @page {{ margin: 1cm; }}
-            body {{ margin: 0; }}
-        }}
-
-        body {{
-            font-family: Consolas, 'Courier New', monospace;
-            max-width: 1000px;
-            margin: 20px auto;
-            padding: 20px;
-            background: white;
-        }}
-
-        h1 {{
-            text-align: center;
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }}
-
-        .timestamp {{
-            text-align: center;
-            color: #7f8c8d;
-            margin-bottom: 30px;
-        }}
-
-        .summary {{
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            margin-bottom: 30px;
-        }}
-
-        .card {{
-            border: 2px solid #ecf0f1;
-            border-radius: 8px;
-            padding: 15px;
-            text-align: center;
-        }}
-
-        .card-title {{
-            font-size: 12px;
-            color: #7f8c8d;
-            margin-bottom: 10px;
-        }}
-
-        .card-value {{
-            font-size: 24px;
-            font-weight: bold;
-        }}
-
-        .profit {{ color: #27ae60; }}
-        .loss {{ color: #e74c3c; }}
-
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }}
-
-        th {{
-            background: #34495e;
-            color: white;
-            padding: 12px;
-            text-align: left;
-            font-weight: bold;
-        }}
-
-        td {{
-            padding: 10px;
-            border-bottom: 1px solid #ecf0f1;
-        }}
-
-        tr:hover {{
-            background: #f8f9fa;
-        }}
-
-        .footer {{
-            margin-top: 40px;
-            text-align: center;
-            color: #7f8c8d;
-            font-size: 12px;
-            border-top: 1px solid #ecf0f1;
-            padding-top: 20px;
-        }}
-    </style>
-</head>
-<body>
-    <h1>📊 PROFIT/LOSS REPORT</h1>
-    <div class="timestamp">Generated on {datetime.now().strftime("%d %b %Y at %I:%M %p")}</div>
-
-    <div class="summary">
-        <div class="card">
-            <div class="card-title">Total Profit</div>
-            <div class="card-value profit">{format_money(self.total_profit)}</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Total Loss</div>
-            <div class="card-value loss">{format_money_abs(self.total_loss)}</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Net P/L</div>
-            <div class="card-value {'profit' if self.net_pnl >= 0 else 'loss'}">{format_money(self.net_pnl)}</div>
-        </div>
-    </div>
-
-    <h2>{period_type} P/L Breakdown</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Period</th>
-                <th>Profit</th>
-                <th>Loss</th>
-                <th>Net P/L</th>
-                <th>Running Total</th>
-            </tr>
-        </thead>
-        <tbody>
-"""
-
-            for item_id in self.pnl_tree.get_children():
-                values = self.pnl_tree.item(item_id, 'values')
-                if len(values) >= 5:
-                    period_name, profit_str, loss_str, net_str, running_str = values
-                    row_class = 'profit' if '₹' in net_str and '-' not in net_str else 'loss' if '-' in net_str else ''
-
-                    html_content += f"""
-            <tr>
-                <td>{period_name}</td>
-                <td class="profit">{profit_str}</td>
-                <td class="loss">{loss_str}</td>
-                <td class="{row_class}">{net_str}</td>
-                <td class="{'profit' if '-' not in running_str else 'loss'}">{running_str}</td>
-            </tr>
-"""
-
-            html_content += """
-        </tbody>
-    </table>
-
-    <div class="footer">
-        <p>Trader Ledger - FIFO-based P/L Calculation System</p>
-        <p>This report was automatically generated. Please verify all figures.</p>
-    </div>
-</body>
-</html>
-"""
-
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
+            from pathlib import Path
+            
+            data = self._collect_report_export_data()
+            filepath = reports_exporter.print_report_html(data)
+            
             logger.info(f"✅ Report saved: {filepath}")
             webbrowser.open(f'file:///{Path(filepath).absolute()}')
-
             messagebox.showinfo(
                 "Report Generated",
                 f"Print-friendly report created:\n{filepath}\n\nOpening in your default browser..."
             )
-
         except Exception as e:
             logger.error(f"Print report failed: {str(e)}", exc_info=True)
             messagebox.showerror("Print Failed", f"Failed to generate report:\n{str(e)}")
@@ -1538,107 +1289,18 @@ class ReportsTab:
         """Export match-level audit details to CSV."""
         try:
             if not self.audit_matches:
-                messagebox.showwarning(
-                    "No Data",
-                    "No match-level data to export. Click Recalculate first."
-                )
+                messagebox.showwarning("No Data", "No match-level data to export. Click Recalculate first.")
                 return
 
-            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = config.EXPORTS_DIR / f"audit_{timestamp}.csv"
-
+            from core.exporters import reports_exporter
             trade_ids = {m['buy_id'] for m in self.audit_matches} | {m['sell_id'] for m in self.audit_matches}
             trade_ts_map = self._get_trade_ts_map(trade_ids)
             remainder_flags = self._build_remainder_flag_by_match_index()
-
-            def rupees(paise: int, absolute: bool = False) -> str:
-                value = abs(paise) if absolute else paise
-                return f"{value / 100:.2f}"
-
-            with open(filepath, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "SellID", "BuyID", "Equity", "Type1", "Type2", "Strike", "Expiry",
-                    "MatchedQty", "BuyDate", "BuyTS", "SellDate", "SellTS",
-                    "BuyBrokerageAutoPaise", "BuyBrokerageOverridePaise", "BuyBrokerageEffectivePaise",
-                    "SellBrokerageAutoPaise", "SellBrokerageOverridePaise", "SellBrokerageEffectivePaise",
-                    "BuyPrice", "SellPrice", "BuyCost", "SellValue",
-                    "BuyBrokerageAlloc", "SellBrokerageAlloc",
-                    "MatchedBuyTotal", "MatchedSellTotal", "GrossPnL",
-                    "MatchedMtfAmount", "HoldingDays", "MtfInterest", "NetPnL",
-                    "AllocationRemainderApplied",
-                    "BuyPricePaise", "SellPricePaise", "BuyCostPaise", "SellValuePaise",
-                    "BuyBrokerageAllocPaise", "SellBrokerageAllocPaise",
-                    "MatchedBuyTotalPaise", "MatchedSellTotalPaise", "GrossPnLPaise",
-                    "MatchedMtfAmountPaise", "MtfInterestPaise", "NetPnLPaise"
-                ])
-
-                for idx, match in enumerate(self.audit_matches):
-                    buy = self.audit_trades_by_id.get(match['buy_id'])
-                    sell = self.audit_trades_by_id.get(match['sell_id'])
-                    if not buy or not sell:
-                        continue
-
-                    buy_date = buy.get('trade_date') or ""
-                    sell_date = sell.get('trade_date') or ""
-                    buy_ts = trade_ts_map.get(match['buy_id']) or (f"{buy_date} 09:15:00" if buy_date else "")
-                    sell_ts = trade_ts_map.get(match['sell_id']) or (f"{sell_date} 09:15:00" if sell_date else "")
-
-                    gross_pnl = match.get('gross_pnl', match.get('realized_pnl', 0))
-                    net_pnl = match.get('net_pnl', gross_pnl)
-                    buy_brokerage_override = buy.get('brokerage_override')
-                    sell_brokerage_override = sell.get('brokerage_override')
-
-                    writer.writerow([
-                        match['sell_id'],
-                        match['buy_id'],
-                        sell.get('equity', ''),
-                        sell.get('type1', ''),
-                        sell.get('type2', '') or '',
-                        "" if sell.get('strike') is None else str(sell.get('strike')),
-                        sell.get('expiry', '') or '',
-                        match['matched_quantity'],
-                        buy_date,
-                        buy_ts,
-                        sell_date,
-                        sell_ts,
-                        int(buy.get('brokerage_auto', 0) or 0),
-                        "" if buy_brokerage_override is None else int(buy_brokerage_override),
-                        int(buy.get('brokerage', 0) or 0),
-                        int(sell.get('brokerage_auto', 0) or 0),
-                        "" if sell_brokerage_override is None else int(sell_brokerage_override),
-                        int(sell.get('brokerage', 0) or 0),
-                        rupees(int(buy.get('price', 0)), absolute=True),
-                        rupees(int(sell.get('price', 0)), absolute=True),
-                        rupees(match['buy_cost'], absolute=True),
-                        rupees(match['sell_value'], absolute=True),
-                        rupees(match['buy_brokerage_alloc'], absolute=True),
-                        rupees(match['sell_brokerage_alloc'], absolute=True),
-                        rupees(match.get('matched_buy_total', match['buy_cost'] + match['buy_brokerage_alloc']), absolute=True),
-                        rupees(match.get('matched_sell_total', match['sell_value'] - match['sell_brokerage_alloc']), absolute=True),
-                        rupees(gross_pnl),
-                        rupees(int(match.get('matched_mtf_amount', 0)), absolute=True),
-                        match.get('holding_days', 0),
-                        rupees(int(match.get('mtf_interest', 0)), absolute=True),
-                        rupees(net_pnl),
-                        remainder_flags.get(idx, "NONE"),
-                        int(buy.get('price', 0) or 0),
-                        int(sell.get('price', 0) or 0),
-                        int(match['buy_cost']),
-                        int(match['sell_value']),
-                        int(match['buy_brokerage_alloc']),
-                        int(match['sell_brokerage_alloc']),
-                        int(match.get('matched_buy_total', match['buy_cost'] + match['buy_brokerage_alloc'])),
-                        int(match.get('matched_sell_total', match['sell_value'] - match['sell_brokerage_alloc'])),
-                        int(gross_pnl),
-                        int(match.get('matched_mtf_amount', 0) or 0),
-                        int(match.get('mtf_interest', 0) or 0),
-                        int(net_pnl)
-                    ])
-
+            
+            filepath = reports_exporter.export_audit_csv(
+                self.audit_matches, self.audit_trades_by_id, trade_ts_map, remainder_flags
+            )
             messagebox.showinfo("Export Complete", f"Audit CSV saved to:\n{filepath}")
-
         except Exception as e:
             logger.error(f"Audit CSV export failed: {str(e)}", exc_info=True)
             messagebox.showerror("Export Failed", f"Failed to export audit CSV:\n{str(e)}")
@@ -1646,62 +1308,10 @@ class ReportsTab:
     def export_report_csv(self) -> None:
         """Export current filtered report to CSV."""
         try:
-            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = config.EXPORTS_DIR / f"report_{timestamp}.csv"
-
+            from core.exporters import reports_exporter
             data = self._collect_report_export_data()
-
-            with open(filepath, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-
-                writer.writerow(["Filters"])
-                writer.writerow(["Equities", data['filters']['equities']])
-                writer.writerow(["From Date", data['filters']['from_date'] or "-"])
-                writer.writerow(["To Date", data['filters']['to_date'] or "-"])
-                writer.writerow(["Type1", data['filters']['type1'] or "All"])
-                writer.writerow(["Expiry Month", data['filters']['expiry_month'] or "-"])
-                writer.writerow(["Include Open Positions", str(data['filters']['include_open_positions'])])
-                writer.writerow([])
-
-                writer.writerow(["Summary"])
-                writer.writerow(["Total Profit", data['summary']['total_profit']])
-                writer.writerow(["Total Loss", data['summary']['total_loss']])
-                writer.writerow(["Net P/L", data['summary']['net_pnl']])
-                writer.writerow(["Win/Loss Ratio", data['summary']['win_loss_ratio']])
-                writer.writerow(["Win Rate", data['summary']['win_rate']])
-                writer.writerow(["Profit Factor", data['summary']['profit_factor']])
-                writer.writerow(["Avg Win", data['summary']['avg_win']])
-                writer.writerow(["Avg Loss", data['summary']['avg_loss']])
-                writer.writerow(["Expectancy", data['summary']['expectancy']])
-                writer.writerow(["Avg Holding Period (days)", data['summary']['avg_holding_days']])
-                writer.writerow(["Median Holding Period (days)", data['summary']['median_holding_days']])
-                writer.writerow(["Max Drawdown", data['summary']['max_drawdown']])
-                writer.writerow([])
-
-                writer.writerow([f"{data['period']['type']} P/L"])
-                writer.writerow(["Period", "Profit", "Loss", "Net P/L", "Running Total"])
-                for row in data['period']['rows']:
-                    writer.writerow(row)
-                writer.writerow([])
-
-                writer.writerow(["Equity-wise Summary"])
-                writer.writerow(["Equity", "Closed P/L", "Open P/L", "Total"])
-                for row in data['equity_summary']:
-                    writer.writerow(row)
-                writer.writerow([])
-
-                if data['open_positions']:
-                    writer.writerow(["Open Positions"])
-                    writer.writerow([
-                        "Equity", "Type1", "Type2", "Strike", "Expiry",
-                        "Holding Days", "Status", "Qty", "Avg Price", "Unrealized P/L"
-                    ])
-                    for row in data['open_positions']:
-                        writer.writerow(row)
-
+            filepath = reports_exporter.export_report_csv(data)
             messagebox.showinfo("Export Complete", f"CSV report saved to:\n{filepath}")
-
         except Exception as e:
             logger.error(f"CSV export failed: {str(e)}", exc_info=True)
             messagebox.showerror("Export Failed", f"Failed to export CSV:\n{str(e)}")
@@ -1709,82 +1319,10 @@ class ReportsTab:
     def export_report_excel(self) -> None:
         """Export current filtered report to Excel (xlsx)."""
         try:
-            from openpyxl import Workbook
-            from openpyxl.styles import Font
-        except Exception:
-            messagebox.showerror(
-                "Missing Dependency",
-                "openpyxl is required for Excel export.\n\nInstall it with:\npip install openpyxl"
-            )
-            return
-
-        try:
-            config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = config.EXPORTS_DIR / f"report_{timestamp}.xlsx"
-
+            from core.exporters import reports_exporter
             data = self._collect_report_export_data()
-
-            wb = Workbook()
-            ws_summary = wb.active if wb.active else wb.create_sheet(title="Summary")
-            ws_summary.title = "Summary"
-
-            bold = Font(bold=True)
-
-            ws_summary.append(["Filters"])
-            if ws_summary:
-                ws_summary["A1"].font = bold
-            ws_summary.append(["Equities", data['filters']['equities']])
-            ws_summary.append(["From Date", data['filters']['from_date'] or "-"])
-            ws_summary.append(["To Date", data['filters']['to_date'] or "-"])
-            ws_summary.append(["Type1", data['filters']['type1'] or "All"])
-            ws_summary.append(["Expiry Month", data['filters']['expiry_month'] or "-"])
-            ws_summary.append(["Include Open Positions", str(data['filters']['include_open_positions'])])
-            ws_summary.append([])
-            ws_summary.append(["Summary"])
-            if ws_summary:
-                ws_summary["A7"].font = bold
-            ws_summary.append(["Total Profit", data['summary']['total_profit']])
-            ws_summary.append(["Total Loss", data['summary']['total_loss']])
-            ws_summary.append(["Net P/L", data['summary']['net_pnl']])
-            ws_summary.append(["Win/Loss Ratio", data['summary']['win_loss_ratio']])
-            ws_summary.append(["Win Rate", data['summary']['win_rate']])
-            ws_summary.append(["Profit Factor", data['summary']['profit_factor']])
-            ws_summary.append(["Avg Win", data['summary']['avg_win']])
-            ws_summary.append(["Avg Loss", data['summary']['avg_loss']])
-            ws_summary.append(["Expectancy", data['summary']['expectancy']])
-            ws_summary.append(["Avg Holding Period (days)", data['summary']['avg_holding_days']])
-            ws_summary.append(["Median Holding Period (days)", data['summary']['median_holding_days']])
-            ws_summary.append(["Max Drawdown", data['summary']['max_drawdown']])
-
-            ws_period = wb.create_sheet(title=f"{data['period']['type']} PnL")
-            ws_period.append(["Period", "Profit", "Loss", "Net P/L", "Running Total"])
-            for cell in ws_period[1]:
-                cell.font = bold
-            for row in data['period']['rows']:
-                ws_period.append(list(row))
-
-            ws_equity = wb.create_sheet(title="Equity Summary")
-            ws_equity.append(["Equity", "Closed P/L", "Open P/L", "Total"])
-            for cell in ws_equity[1]:
-                cell.font = bold
-            for row in data['equity_summary']:
-                ws_equity.append(list(row))
-
-            if data['open_positions']:
-                ws_open = wb.create_sheet(title="Open Positions")
-                ws_open.append([
-                    "Equity", "Type1", "Type2", "Strike", "Expiry",
-                    "Holding Days", "Status", "Qty", "Avg Price", "Unrealized P/L"
-                ])
-                for cell in ws_open[1]:
-                    cell.font = bold
-                for row in data['open_positions']:
-                    ws_open.append(list(row))
-
-            wb.save(filepath)
+            filepath = reports_exporter.export_report_excel(data)
             messagebox.showinfo("Export Complete", f"Excel report saved to:\n{filepath}")
-
         except Exception as e:
             logger.error(f"Excel export failed: {str(e)}", exc_info=True)
             messagebox.showerror("Export Failed", f"Failed to export Excel:\n{str(e)}")
@@ -2172,35 +1710,6 @@ class ReportsTab:
                 format_money(total)
             ), tags=(tag,))
 
-    def _weighted_median(self, buckets: list[tuple[int, int]]) -> float:
-        """Compute weighted median from (value, weight) pairs."""
-        total_weight = sum(weight for _value, weight in buckets)
-        if total_weight == 0:
-            return 0.0
-        sorted_buckets = sorted(buckets, key=lambda x: x[0])
-        running = 0
-        midpoint = total_weight / 2
-        for value, weight in sorted_buckets:
-            running += weight
-            if running >= midpoint:
-                return float(value)
-        return float(sorted_buckets[-1][0])
-
-    def _calculate_max_drawdown(self, daily_pnl_totals: dict[str, int]) -> int:
-        """Calculate max drawdown from daily realized P/L totals."""
-        if not daily_pnl_totals:
-            return 0
-        cumulative = 0
-        peak = 0
-        max_drawdown = 0
-        for date_key in sorted(daily_pnl_totals.keys()):
-            cumulative += daily_pnl_totals[date_key]
-            if cumulative > peak:
-                peak = cumulative
-            drawdown = cumulative - peak
-            if drawdown < max_drawdown:
-                max_drawdown = drawdown
-        return max_drawdown
 
     def _validate_date_format(self, date_str: str) -> bool:
         """Validate date string is in YYYY-MM-DD format."""

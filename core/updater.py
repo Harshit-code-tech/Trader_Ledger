@@ -89,13 +89,14 @@ def download_and_install_update(download_url: str, update_callback=None) -> bool
         
         logger.info(f"Update downloaded to {installer_path}. Executing installer.")
         
-        # Run installer silently
-        # /SILENT means shows progress bar but no clicks required. 
+        # Run installer completely silently
         # /VERYSILENT means completely invisible.
         # /CLOSEAPPLICATIONS tells it to close TraderLedger if it's still running.
-        subprocess.Popen([installer_path, "/SILENT", "/CLOSEAPPLICATIONS"])
+        # /SP- disables the 'This will install...' prompt
+        subprocess.Popen([installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/SP-"])
         
         return True
+        
     except Exception as e:
         logger.error(f"Failed to download/install update: {e}", exc_info=True)
         return False
