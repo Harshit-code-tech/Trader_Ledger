@@ -347,10 +347,12 @@ class ViewRecordsTab:
             conn = sqlite3.connect(str(config.DB_PATH))
             c = conn.cursor()
             # Apply profile filter when loading equities
-            if config.CURRENT_PROFILE_ID is None or config.CURRENT_PROFILE_ID == 0:
+            active_ids = config.ACTIVE_PROFILE_IDS
+            if not active_ids:
                 c.execute("SELECT DISTINCT equity FROM trade_events ORDER BY equity")
             else:
-                c.execute("SELECT DISTINCT equity FROM trade_events WHERE profile_id = ? ORDER BY equity", (config.CURRENT_PROFILE_ID,))
+                placeholders = ','.join('?' * len(active_ids))
+                c.execute(f"SELECT DISTINCT equity FROM trade_events WHERE profile_id IN ({placeholders}) ORDER BY equity", tuple(active_ids))
             equities = [row[0] for row in c.fetchall()]
             conn.close()
             
@@ -419,11 +421,13 @@ class ViewRecordsTab:
             if not self.show_deleted_trades.get():
                 query += " AND is_active = 1"  # Only show active trades
             # If checkbox is checked, show all (active + deleted)
-            # Apply profile filter if set (0 => combined view)
+            # Apply profile filter if set (empty list => combined view)
             import config as _config
-            if _config.CURRENT_PROFILE_ID is not None and _config.CURRENT_PROFILE_ID != 0:
-                query += " AND profile_id = ?"
-                params.append(_config.CURRENT_PROFILE_ID)
+            active_ids = _config.ACTIVE_PROFILE_IDS
+            if active_ids:
+                placeholders = ','.join('?' * len(active_ids))
+                query += f" AND profile_id IN ({placeholders})"
+                params.extend(active_ids)
 
             query += " ORDER BY id DESC"
             
@@ -546,9 +550,11 @@ class ViewRecordsTab:
             where_clause += " AND is_active = 1"
         # Apply profile filter if set (0 => combined view)
         import config as _config
-        if _config.CURRENT_PROFILE_ID is not None and _config.CURRENT_PROFILE_ID != 0:
-            where_clause += " AND profile_id = ?"
-            params.append(_config.CURRENT_PROFILE_ID)
+        active_ids = _config.ACTIVE_PROFILE_IDS
+        if active_ids:
+            placeholders = ','.join('?' * len(active_ids))
+            where_clause += f" AND profile_id IN ({placeholders})"
+            params.extend(active_ids)
 
         return where_clause, params
 
@@ -1049,23 +1055,19 @@ Tips:
                     return
                 
                 try:
-                    profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
+                    profile_id = int(config.PRIMARY_PROFILE_ID) if config.PRIMARY_PROFILE_ID is not None else None
                 except Exception:
                     profile_id = None
-                if profile_id == 0:
+                if profile_id is None:
                     messagebox.showwarning(
                         "Select Profile",
-                        "Combined Family view cannot import trades. Select a profile first."
+                        "Multiple profiles or Combined Family view selected. Select a single profile first."
                     )
                     return
 
                 with sqlite3.connect(str(config.DB_PATH), timeout=10) as conn:
                     conn.execute("PRAGMA foreign_keys = ON")
                     cursor = conn.cursor()
-                    if profile_id is None:
-                        cursor.execute("SELECT id FROM profiles WHERE profile_name = ?", ("Baba",))
-                        rr = cursor.fetchone()
-                        profile_id = rr[0] if rr else 1
 
                     for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
                         try:

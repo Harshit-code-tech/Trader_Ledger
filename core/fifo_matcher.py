@@ -61,24 +61,36 @@ def fetch_active_trades() -> list[TradeTuple]:
     cursor = conn.cursor()
     # Apply profile filter if current profile is set (0 means combined view)
     import config as _config
-    if _config.CURRENT_PROFILE_ID is None or _config.CURRENT_PROFILE_ID == 0:
+    active_ids = _config.ACTIVE_PROFILE_IDS
+    if not active_ids:
         cursor.execute('''
            SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
                quantity, price, brokerage, notes, is_active,
                brokerage_auto, brokerage_override, mtf_amount
         FROM trade_events
         WHERE is_active = 1
-        ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ORDER BY 
+            trade_date,
+            CASE WHEN type1 = 'intraday' AND trade_type = 'BUY' THEN 0 
+                 WHEN type1 = 'intraday' AND trade_type = 'SELL' THEN 1
+                 ELSE 2 END,
+            COALESCE(trade_ts, trade_date || ' 09:15:00'), id
         ''')
     else:
-        cursor.execute('''
+        placeholders = ','.join('?' * len(active_ids))
+        cursor.execute(f'''
            SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
                quantity, price, brokerage, notes, is_active,
                brokerage_auto, brokerage_override, mtf_amount
         FROM trade_events
-        WHERE is_active = 1 AND profile_id = ?
-        ORDER BY COALESCE(trade_ts, trade_date || ' 09:15:00'), id
-        ''', (_config.CURRENT_PROFILE_ID,))
+        WHERE is_active = 1 AND profile_id IN ({placeholders})
+        ORDER BY 
+            trade_date,
+            CASE WHEN type1 = 'intraday' AND trade_type = 'BUY' THEN 0 
+                 WHEN type1 = 'intraday' AND trade_type = 'SELL' THEN 1
+                 ELSE 2 END,
+            COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ''', tuple(active_ids))
     trades = cursor.fetchall()
     conn.close()
     
@@ -215,7 +227,28 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
     contract_holdings: dict[ContractKey, int] = {}  # Track total holdings per contract
     matches: list[MatchRecord] = []
     
+    current_date = None
+    
     for trade in trades:
+        trade_date = trade[1]
+        
+        # Enforce Intraday End-of-Day Square-off
+        if current_date and trade_date != current_date:
+            for ckey, queue in buy_queues.items():
+                if ckey[1] == 'intraday':
+                    rem = sum(item['remaining_quantity'] for item in queue)
+                    if rem > 0:
+                        raise FifoMatchError(
+                            f"\n{'='*60}\n"
+                            f"INTRADAY POSITION NOT SQUARED OFF\n"
+                            f"{'='*60}\n"
+                            f"Date: {current_date}\n"
+                            f"Equity: {ckey[0]}\n"
+                            f"Remaining unsell quantity: {rem}\n"
+                            f"\n💡 Intraday trades must be closed on the same day.\n"
+                            f"{'='*60}"
+                        )
+        current_date = trade_date
         (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
          quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
         
@@ -290,6 +323,23 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
                 if oldest_buy['remaining_quantity'] == 0:
                     buy_queue.pop(0)
     
+    # Check Intraday square-off for the very last date processed
+    if current_date:
+        for ckey, queue in buy_queues.items():
+            if ckey[1] == 'intraday':
+                rem = sum(item['remaining_quantity'] for item in queue)
+                if rem > 0:
+                    raise FifoMatchError(
+                        f"\n{'='*60}\n"
+                        f"INTRADAY POSITION NOT SQUARED OFF\n"
+                        f"{'='*60}\n"
+                        f"Date: {current_date}\n"
+                        f"Equity: {ckey[0]}\n"
+                        f"Remaining unsell quantity: {rem}\n"
+                        f"\n💡 Intraday trades must be closed on the same day.\n"
+                        f"{'='*60}"
+                    )
+
     if collect_matches:
         return matches
     return None

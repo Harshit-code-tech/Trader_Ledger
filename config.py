@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Application info
 APP_NAME = "Trader Ledger - Baba's Trading App"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.1"
 APP_AUTHOR = "Built for Baba"
 
 def get_data_directory():
@@ -96,7 +96,9 @@ ENABLE_AUTO_BACKUP = True
 AUTO_BACKUP_ON_STARTUP = False
 
 # Current profile state (set at runtime by UI)
-# Integer profile id. Use 0 for Combined Family View. None means not selected yet.
-CURRENT_PROFILE_ID: int | None = None
+# PRIMARY_PROFILE_ID: Integer profile id for adding trades. None if multiple/combined.
+PRIMARY_PROFILE_ID: int | None = None
+# ACTIVE_PROFILE_IDS: List of profile IDs to display. Empty list [] means Combined Family View (all profiles).
+ACTIVE_PROFILE_IDS: list[int] = []
 CURRENT_PROFILE_NAME: str | None = None
 

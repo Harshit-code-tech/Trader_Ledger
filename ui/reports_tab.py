@@ -736,7 +736,7 @@ class ReportsTab:
         try:
             import config as _config
 
-            original_profile = _config.CURRENT_PROFILE_ID
+            original_active_ids = list(_config.ACTIVE_PROFILE_IDS)
 
             combined_filtered_pnl_results: list = []
             combined_trades_by_id: dict = {}
@@ -752,8 +752,10 @@ class ReportsTab:
             except Exception:
                 pass
 
-            # If Combined Family view selected (0), compute per-profile and aggregate
-            if _config.CURRENT_PROFILE_ID == 0:
+            active_ids = list(_config.ACTIVE_PROFILE_IDS)
+            
+            # If multiple profiles or Combined Family view (empty list), compute per-profile and aggregate
+            if not active_ids or len(active_ids) > 1:
                 profiles = db_operations.get_active_profiles()
 
                 if not profiles:
@@ -777,8 +779,11 @@ class ReportsTab:
                     return
 
                 for pid, pname in profiles:
+                    if active_ids and pid not in active_ids:
+                        continue
+
                     try:
-                        _config.CURRENT_PROFILE_ID = pid
+                        _config.ACTIVE_PROFILE_IDS = [pid]
                         trades = fetch_active_trades()
                         logger.info(f"Fetched {len(trades)} active trades for profile {pname}")
                         if not trades:
@@ -845,7 +850,7 @@ class ReportsTab:
                         logger.warning(f"Failed to compute P/L for profile {pname}: {e}")
 
                 # Restore original profile selection
-                _config.CURRENT_PROFILE_ID = original_profile
+                _config.ACTIVE_PROFILE_IDS = original_active_ids
 
                 # Use combined results for downstream aggregations
                 filtered_pnl_results = combined_filtered_pnl_results
@@ -916,7 +921,7 @@ class ReportsTab:
             # If combined view, update profile breakdown UI
             try:
                 import config as _config
-                if _config.CURRENT_PROFILE_ID == 0:
+                if not _config.ACTIVE_PROFILE_IDS or len(_config.ACTIVE_PROFILE_IDS) > 1:
                     self.profile_breakdown_data = profile_breakdown
                 else:
                     self.profile_breakdown_data = {}

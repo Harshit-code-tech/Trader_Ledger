@@ -81,8 +81,8 @@ def run():
 
         # Point fifo_matcher to test DB and fetch trades for profile Me
         fifo_matcher.DB_PATH = TEST_DB
-        # Ensure CURRENT_PROFILE_ID points to Me
-        config.CURRENT_PROFILE_ID = me_id
+        # Ensure ACTIVE_PROFILE_IDS points to Me
+        config.ACTIVE_PROFILE_IDS = [me_id]
 
         trades = fifo_matcher.fetch_active_trades()
         print("Fetched trades:", trades)
@@ -95,8 +95,8 @@ def run():
         pnl = apply_mtf_interest(pnl, trades_by_id)
         print("P/L results:", pnl)
 
-        # Also verify that when CURRENT_PROFILE_ID = 0 (combined), fetch returns both profiles
-        config.CURRENT_PROFILE_ID = 0
+        # Also verify that when ACTIVE_PROFILE_IDS = [] (combined), fetch returns both profiles
+        config.ACTIVE_PROFILE_IDS = []
         fifo_matcher.DB_PATH = TEST_DB
         trades_all = fifo_matcher.fetch_active_trades()
         print("Combined fetched trades count:", len(trades_all))

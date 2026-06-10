@@ -27,6 +27,7 @@ class TradeViewTab:
         self.sort_var = tk.StringVar(value="Date")
         self.show_raw_var = tk.BooleanVar(value=False)
         self.total_trades_var = tk.StringVar(value="0")
+        self.total_units_var = tk.StringVar(value="0")
         self.closed_trades_var = tk.StringVar(value="0")
         self.open_trades_var = tk.StringVar(value="0")
         self.total_pnl_var = tk.StringVar(value="₹ 0.00")
@@ -47,8 +48,11 @@ class TradeViewTab:
         summary_frame = ttk.Frame(main_frame)
         summary_frame.pack(fill='x', pady=(0, 10))
 
-        ttk.Label(summary_frame, text="Total Trades:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, text="Raw Trades:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
         ttk.Label(summary_frame, textvariable=self.total_trades_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
+
+        ttk.Label(summary_frame, text="Units:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
+        ttk.Label(summary_frame, textvariable=self.total_units_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
 
         ttk.Label(summary_frame, text="Closed:", font=('Arial', 9)).pack(side='left', padx=(0, 4))
         ttk.Label(summary_frame, textvariable=self.closed_trades_var, font=('Consolas', 10, 'bold')).pack(side='left', padx=(0, 12))
@@ -315,12 +319,19 @@ class TradeViewTab:
         return sorted(units, key=sort_date, reverse=True)
 
     def _update_summary(self, units: Sequence[Mapping[str, Any]]) -> None:
-        total_trades = len(units)
+        total_units = len(units)
         closed_trades = sum(1 for u in units if u['status'] == 'Closed')
         open_trades = sum(1 for u in units if u['status'] == 'Open')
         total_pnl = sum(u.get('net_pnl', u['realized_pnl']) for u in units)
 
-        self.total_trades_var.set(str(total_trades))
+        unique_trade_ids = set()
+        for u in units:
+            unique_trade_ids.update(u.get('buy_trade_ids', []))
+            unique_trade_ids.update(u.get('sell_trade_ids', []))
+        total_raw_trades = len(unique_trade_ids)
+
+        self.total_trades_var.set(str(total_raw_trades))
+        self.total_units_var.set(str(total_units))
         self.closed_trades_var.set(str(closed_trades))
         self.open_trades_var.set(str(open_trades))
         self.total_pnl_var.set(format_money(total_pnl))

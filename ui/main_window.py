@@ -43,21 +43,33 @@ class TraderLedgerApp:
         self.status_profile_label.pack(side=tk.RIGHT)
         
         # Current profile (set by profile selector)
-        self.current_profile_id: int | None = None
-        self.current_profile_name: str | None = None
+        self.active_profile_ids = []
+        self.primary_profile_id = None
+        self.current_profile_name = None
 
-        # Attempt to load last-selected profile; if not present, show selector
+        # Try loading last profile state
         try:
             state_path = config.PROFILE_STATE_FILE
             if state_path.exists():
                 text = state_path.read_text(encoding='utf-8')
                 data = json.loads(text)
-                pid = data.get('id')
+                
+                # Migrate old state
+                if 'id' in data and 'active_ids' not in data:
+                    pid = data.get('id')
+                    data['active_ids'] = [pid] if pid else []
+                    data['primary_id'] = pid
+                
+                active_ids = data.get('active_ids', [])
+                primary_id = data.get('primary_id')
                 pname = data.get('name')
-                if pid is not None:
-                    config.CURRENT_PROFILE_ID = pid
+                
+                if active_ids or primary_id is None:
+                    config.ACTIVE_PROFILE_IDS = active_ids
+                    config.PRIMARY_PROFILE_ID = primary_id
                     config.CURRENT_PROFILE_NAME = pname
-                    self.current_profile_id = pid
+                    self.active_profile_ids = active_ids
+                    self.primary_profile_id = primary_id
                     self.current_profile_name = pname
                     # Update UI
                     self.root.title(f"📊 Trader Ledger - {pname}")
@@ -131,7 +143,8 @@ class TraderLedgerApp:
             list_frame = ttk.Frame(dialog)
             list_frame.pack(fill='both', expand=True, padx=12, pady=6)
 
-            profiles_listbox = tk.Listbox(list_frame, height=8)
+            # Using MULTIPLE select mode to allow combining specific profiles
+            profiles_listbox = tk.Listbox(list_frame, height=8, selectmode=tk.MULTIPLE)
             profiles_listbox.pack(side='left', fill='both', expand=True)
             scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=profiles_listbox.yview)
             scrollbar.pack(side='right', fill='y')
@@ -151,18 +164,30 @@ class TraderLedgerApp:
             def select_profile():
                 sel = profiles_listbox.curselection()
                 if not sel:
-                    messagebox.showwarning("No selection", "Please select a profile or create a new one.")
+                    messagebox.showwarning("No selection", "Please select at least one profile.")
                     return
-                text = profiles_listbox.get(sel[0])
-                pid_str, pname = text.split(':', 1)
-                pid = int(pid_str.strip())
-                pname = pname.strip()
-                self._apply_profile_selection(pid, pname, f"📊 Trader Ledger - {pname}")
+                
+                active_ids = []
+                names = []
+                for idx in sel:
+                    text = profiles_listbox.get(idx)
+                    pid_str, pname = text.split(':', 1)
+                    active_ids.append(int(pid_str.strip()))
+                    names.append(pname.strip())
+                    
+                if len(active_ids) == 1:
+                    primary_id = active_ids[0]
+                    display_name = names[0]
+                else:
+                    primary_id = None
+                    display_name = f"Combined ({', '.join(names)})"
+                    
+                self._apply_profile_selection(active_ids, primary_id, display_name, f"📊 Trader Ledger - {display_name}")
                 dialog.grab_release()
                 dialog.destroy()
 
             def select_combined():
-                self._apply_profile_selection(0, "Combined Family", "📊 Trader Ledger - Combined Family View")
+                self._apply_profile_selection([], None, "Combined Family", "📊 Trader Ledger - Combined Family View")
                 dialog.grab_release()
                 dialog.destroy()
 
@@ -216,13 +241,9 @@ class TraderLedgerApp:
                         db_operations.update_profile(pid, new_name)
                         load_profiles()
                         edit_dialog.destroy()
-                        # If editing current selected profile, update persisted state and UI
-                        if self.current_profile_id == pid:
-                            try:
-                                state_path = config.PROFILE_STATE_FILE
-                                state_path.write_text(json.dumps({"id": pid, "name": new_name}), encoding='utf-8')
-                                self.profile_status_var.set(f"Profile: {new_name}")
-                                self.root.title(f"📊 Trader Ledger - {new_name}")
+                        # If editing a profile currently in use, just re-apply to update name
+                        if pid in self.active_profile_ids or pid == self.primary_profile_id:
+                            self._apply_profile_selection(self.active_profile_ids, self.primary_profile_id, new_name if len(self.active_profile_ids) == 1 else "Combined Selected", f"📊 Trader Ledger - {new_name}")
                             except Exception:
                                 pass
                     except Exception as exc:
@@ -252,23 +273,25 @@ class TraderLedgerApp:
                         db_operations.delete_profile(pid)
                         load_profiles()
                         # If deleting current profile, clear persisted state
-                        if self.current_profile_id == pid:
+                        if pid in self.active_profile_ids or pid == self.primary_profile_id:
                             try:
                                 state_path = config.PROFILE_STATE_FILE
                                 if state_path.exists():
                                     state_path.unlink()
                             except Exception:
                                 pass
-                            config.CURRENT_PROFILE_ID = None
+                            config.ACTIVE_PROFILE_IDS = []
+                            config.PRIMARY_PROFILE_ID = None
                             config.CURRENT_PROFILE_NAME = None
-                            self.current_profile_id = None
+                            self.active_profile_ids = []
+                            self.primary_profile_id = None
                             self.current_profile_name = None
                             self.profile_status_var.set("Profile: (not selected)")
                     except Exception as exc:
                         messagebox.showerror("Error", f"Could not delete profile: {exc}")
 
             def close_dialog() -> None:
-                if self.current_profile_id is None:
+                if self.primary_profile_id is None and not self.active_profile_ids and self.current_profile_name != "Combined Family":
                     messagebox.showwarning("Profile Required", "Please select a profile to continue.")
                     return
                 dialog.grab_release()
@@ -279,10 +302,12 @@ class TraderLedgerApp:
         except Exception as exc:
             logger.error(f"Profile selector failed: {exc}", exc_info=True)
 
-    def _apply_profile_selection(self, profile_id: int, profile_name: str, title: str) -> None:
-        config.CURRENT_PROFILE_ID = profile_id
+    def _apply_profile_selection(self, active_ids: list[int], primary_id: int | None, profile_name: str, title: str) -> None:
+        config.ACTIVE_PROFILE_IDS = active_ids
+        config.PRIMARY_PROFILE_ID = primary_id
         config.CURRENT_PROFILE_NAME = profile_name
-        self.current_profile_id = profile_id
+        self.active_profile_ids = active_ids
+        self.primary_profile_id = primary_id
         self.current_profile_name = profile_name
         self.root.title(title)
         try:
@@ -291,7 +316,11 @@ class TraderLedgerApp:
             pass
         try:
             state_path = config.PROFILE_STATE_FILE
-            state_path.write_text(json.dumps({"id": profile_id, "name": profile_name}), encoding='utf-8')
+            state_path.write_text(json.dumps({
+                "active_ids": active_ids,
+                "primary_id": primary_id,
+                "name": profile_name
+            }), encoding='utf-8')
         except Exception:
             pass
         self._refresh_after_profile_change()

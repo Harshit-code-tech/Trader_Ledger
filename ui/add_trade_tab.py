@@ -612,7 +612,7 @@ class AddTradeTab:
         """Load unique equity symbols from database for autocomplete using DB layer."""
         try:
             from core.db_operations import get_unique_equities
-            equities = get_unique_equities(config.CURRENT_PROFILE_ID)
+            equities = get_unique_equities(config.PRIMARY_PROFILE_ID)
             self.equity_values = equities
             self.equity_entry['values'] = equities
             logger.debug(f"Loaded {len(equities)} unique equities for dropdown")
@@ -676,16 +676,13 @@ class AddTradeTab:
             return
             
         try:
-            profile_id = int(config.CURRENT_PROFILE_ID) if config.CURRENT_PROFILE_ID is not None else None
+            profile_id = int(config.PRIMARY_PROFILE_ID) if config.PRIMARY_PROFILE_ID is not None else None
         except Exception:
             profile_id = None
             
-        if profile_id == 0:
-            messagebox.showwarning("Select Profile", "Combined Family view cannot save trades. Select a profile first.")
-            return
-            
         if profile_id is None:
-            profile_id = 1 # Fallback
+            messagebox.showwarning("Select Profile", "Multiple profiles or Combined Family view selected. Select a single profile first.")
+            return
             
         try:
             trade_id = trade_manager.save_trade(data, profile_id)
@@ -715,7 +712,7 @@ class AddTradeTab:
             
         from core import trade_manager
         try:
-            trades = trade_manager.get_recent_trades(config.CURRENT_PROFILE_ID)
+            trades = trade_manager.get_recent_trades(config.PRIMARY_PROFILE_ID)
             
             for trade in trades:
                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise = trade

@@ -69,16 +69,17 @@ def run():
 
     # Point fifo matcher to test DB
     fifo_matcher.DB_PATH = TEST_DB
-    config.CURRENT_PROFILE_ID = tester_id
-
-    trades = fifo_matcher.fetch_active_trades()
-    if len(trades) < 2:
+    # Set current profile to tester_id and fetch trades
+    import config
+    config.ACTIVE_PROFILE_IDS = [tester_id]
+    trades_tester = fifo_matcher.fetch_active_trades()
+    if len(trades_tester) < 2:
         fail('Did not fetch inserted trades for Tester profile')
 
-    # Combined view should fetch trades for all profiles
-    config.CURRENT_PROFILE_ID = 0
+    # Set profile to Combined and fetch
+    config.ACTIVE_PROFILE_IDS = []
     trades_all = fifo_matcher.fetch_active_trades()
-    if len(trades_all) < len(trades):
+    if len(trades_all) < len(trades_tester):
         fail('Combined view returned fewer trades than profile view')
 
     conn.close()
