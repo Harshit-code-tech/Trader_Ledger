@@ -46,7 +46,8 @@ def build_trades_by_id(trades: list[TradeTuple]) -> dict[int, TradeDict]:
             is_active=record.is_active,
             brokerage_auto=record.brokerage_auto,
             brokerage_override=record.brokerage_override,
-            mtf_amount=record.mtf_amount
+            mtf_amount=record.mtf_amount,
+            mtf_rate_ppm=record.mtf_rate_ppm
         )
     return trades_by_id
 

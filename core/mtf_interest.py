@@ -19,8 +19,7 @@ def _calendar_holding_days(buy_date: str, sell_date: str) -> int:
 
 def apply_mtf_interest(
     match_results: Iterable[Mapping[str, Any]],
-    trades_by_id: Mapping[int, Mapping[str, Any]],
-    annual_rate_ppm: int = ANNUAL_RATE_PPM
+    trades_by_id: Mapping[int, Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
     """
     Enrich match results with MTF interest and net P/L.
@@ -33,6 +32,7 @@ def apply_mtf_interest(
     - matched_mtf_amount
     - holding_days
     - mtf_interest
+    - mtf_rate_ppm
     - net_pnl
     """
     match_list = list(match_results)
@@ -75,8 +75,17 @@ def apply_mtf_interest(
             mtf_alloc_idx[buy_id] += 1
 
         interest = 0
+        raw_rate_ppm = buy_trade.get('mtf_rate_ppm')
+        if raw_rate_ppm is None:
+            rate_ppm = 96500
+        else:
+            try:
+                rate_ppm = float(raw_rate_ppm)
+            except (ValueError, TypeError):
+                rate_ppm = 96500
+
         if matched_mtf_amount > 0 and holding_days > 0:
-            interest = round_divide(matched_mtf_amount * annual_rate_ppm * holding_days, 365 * 1_000_000)
+            interest = round_divide(matched_mtf_amount * rate_ppm * holding_days, 365 * 1_000_000)
 
         gross_pnl = match.get('gross_pnl')
         if gross_pnl is None:
@@ -88,6 +97,7 @@ def apply_mtf_interest(
         enriched['matched_mtf_amount'] = matched_mtf_amount
         enriched['holding_days'] = holding_days
         enriched['mtf_interest'] = interest
+        enriched['mtf_rate_ppm'] = rate_ppm if matched_mtf_amount > 0 else 0
         enriched['net_pnl'] = gross_pnl - interest
         results.append(enriched)
 

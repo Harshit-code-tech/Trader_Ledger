@@ -269,6 +269,8 @@ class TradeViewTab:
                         sell_total = match['sell_value'] - match['sell_brokerage_alloc']
                         mtf_amount = match.get('matched_mtf_amount', 0)
                         mtf_interest = match.get('mtf_interest', 0)
+                        mtf_rate_ppm = match.get('mtf_rate_ppm', 0)
+                        mtf_rate_pct = f"{mtf_rate_ppm / 10000:.2f}%" if mtf_rate_ppm else "0.00%"
                         holding_days = match.get('holding_days', 0)
                         net_pnl = match.get('net_pnl', match['realized_pnl'])
                         audit_text = (
@@ -276,7 +278,7 @@ class TradeViewTab:
                             f"Buy total {format_money_abs(buy_total)} (brk {format_money_abs(match['buy_brokerage_alloc'])}) | "
                             f"Sell total {format_money_abs(sell_total)} (brk {format_money_abs(match['sell_brokerage_alloc'])}) | "
                             f"MTF amt {format_money_abs(mtf_amount)} | Days {holding_days} | "
-                            f"Interest {format_money_abs(mtf_interest)} | Net {format_money(net_pnl)}"
+                            f"Interest {format_money_abs(mtf_interest)} (Rate {mtf_rate_pct}) | Net {format_money(net_pnl)}"
                         )
                         self.units_tree.insert(parent_id, 'end', values=(
                             audit_text,

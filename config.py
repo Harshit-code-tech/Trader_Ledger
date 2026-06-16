@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Application info
 APP_NAME = "Trader Ledger - Baba's Trading App"
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 APP_AUTHOR = "Built for Baba"
 
 def get_data_directory():

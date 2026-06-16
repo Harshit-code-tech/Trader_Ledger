@@ -88,6 +88,19 @@ def validate_trade_data(data: Dict[str, Any]) -> Tuple[bool, str]:
             return False, "MTF amount must be a number"
         if mtf_amount <= 0:
             return False, "MTF amount is required for MTF BUY trades"
+        try:
+            mtf_rate_str = data.get('mtf_rate_pct', '')
+            # If completely empty, we allow it to fail or fallback. The form should pass something.
+            if mtf_rate_str is None or str(mtf_rate_str).strip() == '':
+                return False, "MTF rate is required for MTF BUY trades"
+            mtf_rate = float(mtf_rate_str)
+            if mtf_rate < 0:
+                return False, "MTF rate cannot be negative"
+            if mtf_rate > 1000:  # Sensible upper bound to prevent overflow (1000%)
+                return False, "MTF rate is unusually high (max 1000%)"
+        except ValueError:
+            return False, "MTF rate must be a valid number"
+
         trade_amount = quantity * int(price * 100)
         if int(mtf_amount * 100) > trade_amount:
             return False, "MTF amount cannot exceed buy trade amount"
@@ -137,8 +150,15 @@ def save_trade(data: Dict[str, Any], profile_id: int) -> int:
         brokerage_override = None
         
     mtf_amount_paise = 0
+    mtf_rate_ppm = None
     if type1_norm == 'mtf' and trade_type == 'BUY':
-        mtf_amount_paise = int(float(data.get('mtf_amount', 0) or 0) * 100)
+        try:
+            mtf_amount_paise = int(float(data.get('mtf_amount', 0) or 0) * 100)
+            mtf_rate_pct = float(data.get('mtf_rate_pct', 9.65) or 9.65)
+            mtf_rate_ppm = int(mtf_rate_pct * 10000)
+        except (ValueError, TypeError):
+            mtf_amount_paise = 0
+            mtf_rate_ppm = 96500
         
     notes = data.get('notes', '').strip()
     if trade_type == 'SELL':
@@ -157,13 +177,13 @@ def save_trade(data: Dict[str, Any], profile_id: int) -> int:
             INSERT INTO trade_events (
                 trade_date, equity, trade_type, quantity, price, brokerage,
                 brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
-                type1, type2, strike, expiry, is_active, profile_id
+                type1, type2, strike, expiry, is_active, profile_id, mtf_rate_ppm
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         """, (
             trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
             brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
-            type1, type2, strike, expiry, profile_id
+            type1, type2, strike, expiry, profile_id, mtf_rate_ppm
         ))
         trade_id = c.lastrowid
         conn.commit()

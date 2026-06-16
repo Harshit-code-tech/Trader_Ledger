@@ -57,6 +57,19 @@ def init_database(db_path: str | None = None) -> bool:
             )
         ''')
 
+        # Create settings table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            )
+        ''')
+        
+        # Initialize default MTF rate if missing
+        cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'default_mtf_rate_ppm'")
+        if cursor.fetchone() is None:
+            cursor.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('default_mtf_rate_ppm', '96500')")
+
         # Create profiles table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS profiles (
@@ -146,13 +159,19 @@ def init_database(db_path: str | None = None) -> bool:
             "brokerage_auto": "brokerage_auto NUMERIC NOT NULL DEFAULT 0 CHECK (brokerage_auto >= 0)",
             "brokerage_override": "brokerage_override NUMERIC CHECK (brokerage_override >= 0)",
             "mtf_amount": "mtf_amount NUMERIC NOT NULL DEFAULT 0 CHECK (mtf_amount >= 0)",
-            "trade_ts": "trade_ts TEXT"
+            "trade_ts": "trade_ts TEXT",
+            "mtf_rate_ppm": "mtf_rate_ppm NUMERIC"
         }
         for column_name, column_def in columns_to_add.items():
             if column_name not in existing_columns:
                 cursor.execute(f"ALTER TABLE trade_events ADD COLUMN {column_def}")
                 logger.info(f"Added column '{column_name}' to trade_events")
                 existing_columns.add(column_name)
+
+                # Backfill mtf_rate_ppm for existing MTF BUY trades
+                if column_name == "mtf_rate_ppm":
+                    cursor.execute("UPDATE trade_events SET mtf_rate_ppm = 96500 WHERE type1 = 'mtf' AND trade_type = 'BUY' AND mtf_rate_ppm IS NULL")
+                    logger.info(f"Backfilled mtf_rate_ppm to 96500 for {cursor.rowcount} existing MTF BUY trades")
 
         if "trade_ts" in existing_columns:
             cursor.execute(

@@ -89,3 +89,37 @@ def delete_profile(profile_id: int) -> bool:
         raise e
     finally:
         conn.close()
+
+def get_setting(key: str, default: str = "") -> str:
+    """Fetch a configuration setting from the database."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT setting_value FROM settings WHERE setting_key = ?", (key,))
+        row = c.fetchone()
+        if row:
+            return row[0]
+        return default
+    except Exception as e:
+        logger.error(f"Failed to get setting {key}: {e}")
+        return default
+    finally:
+        conn.close()
+
+def set_setting(key: str, value: str) -> bool:
+    """Insert or update a configuration setting in the database."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) "
+            "ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
+            (key, value)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set setting {key}: {e}")
+        return False
+    finally:
+        conn.close()

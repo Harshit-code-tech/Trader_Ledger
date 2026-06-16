@@ -59,6 +59,16 @@ class AddTradeTab:
         # Set default date to today (only for text entry fallback)
         if not CALENDAR_AVAILABLE:
             self.date_entry.insert(0, date.today().strftime('%d-%m-%Y'))
+            
+        # Fetch global default MTF rate safely
+        from core.db_operations import get_setting
+        try:
+            self.default_mtf_rate_pct = float(get_setting('default_mtf_rate_ppm', '96500')) / 10000
+        except (ValueError, TypeError):
+            self.default_mtf_rate_pct = 9.65
+
+        self.mtf_rate_var.set(f"{self.default_mtf_rate_pct:.2f}")
+        self.update_mtf_rate_hint()
         
         logger.debug("Add Trade tab initialized")
     
@@ -265,6 +275,17 @@ class AddTradeTab:
         self.mtf_amount_hint.grid(row=row, column=2, sticky='w', padx=5)
         row += 1
         
+        # MTF Rate (BUY only, MTF type)
+        self.mtf_rate_label = ttk.Label(main_frame, text="MTF Rate (%):", font=('Consolas', 10))
+        self.mtf_rate_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.mtf_rate_var = tk.StringVar()
+        self.mtf_rate_entry = ttk.Entry(main_frame, textvariable=self.mtf_rate_var, width=20, font=('Consolas', 10))
+        self.mtf_rate_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.mtf_rate_hint = ttk.Label(main_frame, text="", font=('Consolas', 9), foreground='gray')
+        self.mtf_rate_hint.grid(row=row, column=2, sticky='w', padx=5)
+        self.mtf_rate_var.trace_add('write', lambda *_: self.update_mtf_rate_hint())
+        row += 1
+        
         # Notes
         ttk.Label(main_frame, text="Notes:", font=('Consolas', 10)).grid(row=row, column=0, sticky='ne', padx=5, pady=8)
         self.notes_entry = tk.Text(main_frame, width=30, height=3, font=('Consolas', 10))
@@ -384,10 +405,32 @@ class AddTradeTab:
             self.mtf_amount_label.grid()
             self.mtf_amount_entry.grid()
             self.mtf_amount_hint.grid()
+            self.mtf_rate_label.grid()
+            self.mtf_rate_entry.grid()
+            self.mtf_rate_hint.grid()
         else:
             self.mtf_amount_label.grid_remove()
             self.mtf_amount_entry.grid_remove()
             self.mtf_amount_hint.grid_remove()
+            self.mtf_rate_label.grid_remove()
+            self.mtf_rate_entry.grid_remove()
+            self.mtf_rate_hint.grid_remove()
+
+    def update_mtf_rate_hint(self) -> None:
+        current_val = self.mtf_rate_var.get().strip()
+        if not current_val:
+            self.mtf_rate_hint.config(text="Rate is required", foreground='red')
+            return
+        try:
+            val = float(current_val)
+            if val < 0:
+                self.mtf_rate_hint.config(text="Rate cannot be negative", foreground='red')
+            elif abs(val - self.default_mtf_rate_pct) < 0.001:
+                self.mtf_rate_hint.config(text=f"Using default rate: {self.default_mtf_rate_pct:.2f}%", foreground='gray')
+            else:
+                self.mtf_rate_hint.config(text="Custom rate for this trade", foreground='#e67e22')
+        except ValueError:
+            self.mtf_rate_hint.config(text="Invalid rate format", foreground='red')
 
     def update_brokerage_state(self) -> None:
         """Update brokerage field based on override and configured rates."""
@@ -482,7 +525,7 @@ class AddTradeTab:
         for trade in trades:
             (trade_id, trade_date, trade_equity, trade_type, trade_type1,
              trade_type2, trade_strike, trade_expiry, quantity, price_paise,
-             _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
+             _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount, _mtf_rate_ppm) = trade
 
             if trade_type != 'BUY':
                 continue
@@ -659,6 +702,7 @@ class AddTradeTab:
             'override_brokerage': self.override_brokerage_var.get(),
             'classification': (type1, type2, strike, expiry),
             'mtf_amount': self.mtf_amount_entry.get().strip(),
+            'mtf_rate_pct': self.mtf_rate_entry.get().strip(),
             'selected_sell_reference': self._get_selected_sell_reference(),
             'sell_reference_meta': self.sell_reference_meta,
             'notes': self.notes_entry.get('1.0', 'end-1c').strip()
@@ -754,6 +798,7 @@ class AddTradeTab:
         self.brokerage_entry.insert(0, "0")
         self.override_brokerage_var.set(False)
         self.mtf_amount_entry.delete(0, tk.END)
+        self.mtf_rate_var.set(f"{self.default_mtf_rate_pct:.2f}")
         self.notes_entry.delete('1.0', tk.END)
         self.equity_entry.focus()
         self.update_status("Form cleared")

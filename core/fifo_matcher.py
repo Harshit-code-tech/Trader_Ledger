@@ -27,8 +27,8 @@ class MatchRecord(TypedDict):
 
 # Trade tuple from DB:
 # (id, trade_date, equity, trade_type, type1, type2, strike, expiry, quantity, price,
-#  brokerage_effective, notes, is_active, brokerage_auto, brokerage_override, mtf_amount)
-TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None, int, int, int, str, int, int, int | None, int]
+#  brokerage_effective, notes, is_active, brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm)
+TradeTuple = tuple[int, str, str, str, str, str | None, float | None, str | None, int, int, int, str, int, int, int | None, int, int | None]
 ContractKey = tuple[str, str, str | None, float | None, str | None]
 
 
@@ -50,6 +50,7 @@ class TradeRecord:
     brokerage_auto: int
     brokerage_override: int | None
     mtf_amount: int
+    mtf_rate_ppm: int | None
 
     @classmethod
     def from_tuple(cls, trade: TradeTuple) -> "TradeRecord":
@@ -66,7 +67,7 @@ def fetch_active_trades() -> list[TradeTuple]:
         cursor.execute('''
            SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
                quantity, price, brokerage, notes, is_active,
-               brokerage_auto, brokerage_override, mtf_amount
+               brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm
         FROM trade_events
         WHERE is_active = 1
         ORDER BY 
@@ -81,7 +82,7 @@ def fetch_active_trades() -> list[TradeTuple]:
         cursor.execute(f'''
            SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
                quantity, price, brokerage, notes, is_active,
-               brokerage_auto, brokerage_override, mtf_amount
+               brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm
         FROM trade_events
         WHERE is_active = 1 AND profile_id IN ({placeholders})
         ORDER BY 
@@ -99,7 +100,7 @@ def fetch_active_trades() -> list[TradeTuple]:
     
     for trade in trades:
         (trade_id, trade_date, equity, trade_type, type1_raw, type2_raw, strike_raw, expiry_raw,
-         quantity, price, brokerage, notes, is_active, brokerage_auto, brokerage_override, mtf_amount) = trade
+         quantity, price, brokerage, notes, is_active, brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm) = trade
         
         # Normalize equity (strip whitespace and uppercase)
         equity = equity.strip().upper()
@@ -211,7 +212,7 @@ def fetch_active_trades() -> list[TradeTuple]:
         normalized_trades.append(
             (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
              quantity, price, effective_brokerage, notes, is_active, int(brokerage_auto or 0),
-             int(brokerage_override) if brokerage_override is not None else None, mtf_amount)
+             int(brokerage_override) if brokerage_override is not None else None, mtf_amount, mtf_rate_ppm)
         )
     
     return normalized_trades
@@ -239,7 +240,7 @@ def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[M
             current_date = trade_date
             
         (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-         quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount) = trade
+         quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount, _mtf_rate_ppm) = trade
         
         # Validate equity field
         if not equity or equity.strip() == '':
