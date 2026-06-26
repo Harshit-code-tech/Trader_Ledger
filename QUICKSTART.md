@@ -1,4 +1,4 @@
-# Trader Ledger v1.2 - Quick Start Guide
+# Trader Ledger v1.4.6 - Quick Start Guide
 
 ## For First-Time Use
 
@@ -118,4 +118,4 @@ Check the log file: `logs/trader_ledger.log`
 
 ---
 
-**Version 1.4.4** - Ready for daily use
+**Version 1.4.6** - Ready for daily use

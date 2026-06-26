@@ -115,8 +115,11 @@ class TradeViewTab:
         table_frame = ttk.Frame(main_frame)
         table_frame.pack(fill='both', expand=True)
 
-        scrollbar = ttk.Scrollbar(table_frame)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar_y = ttk.Scrollbar(table_frame, orient='vertical')
+        scrollbar_y.pack(side='right', fill='y')
+
+        scrollbar_x = ttk.Scrollbar(table_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
 
         columns = (
             'Trade Label', 'Contract', 'Buy Qty', 'Avg Buy', 'Sell Qty', 'Avg Sell',
@@ -127,9 +130,11 @@ class TradeViewTab:
             table_frame,
             columns=columns,
             show='tree headings',
-            yscrollcommand=scrollbar.set
+            yscrollcommand=scrollbar_y.set,
+            xscrollcommand=scrollbar_x.set
         )
-        scrollbar.config(command=self.units_tree.yview)
+        scrollbar_y.config(command=self.units_tree.yview)
+        scrollbar_x.config(command=self.units_tree.xview)
 
         self.units_tree.heading('#0', text='')
         self.units_tree.column('#0', width=24, stretch=False)

@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.4-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
+[![Version](https://img.shields.io/badge/version-1.4.6-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -15,28 +15,23 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Accurate FIFO Calculations** - Automatically matches sell orders with buy orders using First-In-First-Out logic
 - ✅ **Trade Management** - Record, edit, and delete BUY/SELL transactions with validation
 - ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
-- 🆕 **Equity-wise Filtering (v1.1)** - Analyze P/L for individual stocks
-- 🆕 **Date Range Filtering (v1.1)** - View performance for specific time periods
-- 🆕 **Open Positions Tracking (v1.1)** - See stocks you're still holding with average prices and holding days
-- 🆕 **Restore Deleted Trades (v1.2)** - Soft-deleted trades can be restored from View Records
-- 🆕 **Onboarding Walkthrough (v1.2)** - Reopen the guided walkthrough anytime from the top-right button
-- 🆕 **Stock Symbol Suggestions (v1.2)** - Type-ahead suggestions in the Add Trade tab
-- 🆕 **Auto Brokerage + MTF Interest (v1.2)** - Auto brokerage where configured, manual override where needed, and post-FIFO MTF interest support
-- 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing and timestamp auditability
-- ✅ **CSV Import/Export** - Bulk import trades and export reports in CSV or Excel format
+- 🆕 **Smart Profile Filtering (v1.4.6)** - Dynamic filtering of active profiles and automatic UI cleanup for single-profile setups
+- 🆕 **Responsive Data Tables (v1.4.6)** - Added horizontal scrollbars to all data grids for better small-screen viewing
+- 🆕 **Dynamic Type Filtering (v1.4.6)** - Automatically fetches and populates available 'Type 1' fields for dynamic reports
+- 🆕 **Multi-Profile Selection (v1.4.3)** - Combined family view and per-profile tracking
+- 🆕 **Intraday Short-Selling (v1.4.3)** - Native FIFO support for Intraday shorting (Sell first, Buy later)
+- 🆕 **Auto Brokerage + MTF Interest (v1.2)** - Configurable auto brokerage and post-FIFO MTF interest support
+- 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
-- ✅ **Offline First** - Works completely offline with all data stored locally
-- ✅ **Clean UI** - User-friendly Tkinter interface with calendar date picker and data validation
 
-## 🆕 What's New in v1.4.3
+## 🆕 What's New in v1.4.6
 
-Version 1.4.3 brings multi-profile filtering, native Intraday (MIS) short-selling support, blazing fast lazy-loading, and a seamless background updater.
+Version 1.4.6 focuses on UI responsiveness, intelligent filtering, and overall user experience improvements:
 
-- **Multi-Profile Selection**: Select multiple profiles at once in Reports and Trade Views to get a combined dashboard of their trades.
-- **Intraday Short-Selling**: The FIFO engine now elegantly handles Intraday `BUY` and `SELL` matching natively, allowing you to short-sell (Sell first, Buy later) without triggering Oversell errors as long as trades occur on the same day.
-- **Blazing Fast Startup**: Heavy data grids and report logic are now lazy-loaded in the background. The app opens instantly.
-- **Seamless Background Updates**: `updater.py` automatically checks GitHub for updates and silently installs them in the background using Inno Setup's silent flags, completely invisible to the user!
-- **Integrated Tracing (v1.3)**: Added optional `blackbox_recorder` tracing and saved trace reports to `logs/` for easier debugging and auditability.
+- **Enhanced Table Usability:** All treeview data tables (Reports, View Records, Open Positions) now support horizontal scrolling, making the app much more usable in a minimized or side-by-side window layout.
+- **Smart Profile Visibility:** The Reports tab now intelligently detects if only one profile is active. If so, it hides the redundant 'Profiles (combined view)' filter and 'Profile Breakdown' table, keeping the UI clean.
+- **Dynamic Trade Type Filters:** The 'Type 1' filter in the Reports tab no longer uses hardcoded values. It now dynamically fetches all available types from your trades (e.g. intraday, delivery, mtf, futures), making it completely adaptable to your unique trading style.
+- **Active Profile Filtering:** The profile dropdown in Reports now correctly isolates to show *only* the profiles you've selected from the main Profile window, removing unnecessary clutter.
 
 👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
 👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details

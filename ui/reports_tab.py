@@ -39,7 +39,7 @@ from core.pnl_aggregator import (
     aggregate_trade_value_by_date,
     filter_matches_by_date_range
 )
-from core.open_positions import calculate_open_positions, get_unique_equities, OpenPosition
+from core.open_positions import calculate_open_positions, get_unique_equities, OpenPosition, get_unique_type1s
 from core.run_ledger import build_trades_by_id
 from core.utils import format_money, format_money_abs, format_period_label
 from core.allocations import round_divide
@@ -298,8 +298,11 @@ class ReportsTab:
         table_frame = ttk.Frame(parent)
         table_frame.pack(fill='both', expand=True, pady=(0, 10))
 
-        scrollbar = ttk.Scrollbar(table_frame)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar_y = ttk.Scrollbar(table_frame, orient='vertical')
+        scrollbar_y.pack(side='right', fill='y')
+
+        scrollbar_x = ttk.Scrollbar(table_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
 
         columns = ('Period', 'Profit', 'Loss', 'Net P/L', 'Running Total')
         self.pnl_tree = ttk.Treeview(
@@ -307,9 +310,11 @@ class ReportsTab:
             columns=columns,
             show='headings',
             height=12,
-            yscrollcommand=scrollbar.set
+            yscrollcommand=scrollbar_y.set,
+            xscrollcommand=scrollbar_x.set
         )
-        scrollbar.config(command=self.pnl_tree.yview)
+        scrollbar_y.config(command=self.pnl_tree.yview)
+        scrollbar_x.config(command=self.pnl_tree.xview)
 
         self.pnl_tree.heading('Period', text='Period', anchor='w')
         self.pnl_tree.heading('Profit', text='Profit (₹)', anchor='e')
@@ -347,8 +352,11 @@ class ReportsTab:
         table_frame = ttk.Frame(parent)
         table_frame.pack(fill='both', expand=True, pady=(0, 10))
 
-        scrollbar = ttk.Scrollbar(table_frame)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar_y = ttk.Scrollbar(table_frame, orient='vertical')
+        scrollbar_y.pack(side='right', fill='y')
+
+        scrollbar_x = ttk.Scrollbar(table_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
 
         columns = ('Equity', 'Closed P/L', 'Open P/L', 'Total')
         self.equity_tree = ttk.Treeview(
@@ -356,9 +364,11 @@ class ReportsTab:
             columns=columns,
             show='headings',
             height=8,
-            yscrollcommand=scrollbar.set
+            yscrollcommand=scrollbar_y.set,
+            xscrollcommand=scrollbar_x.set
         )
-        scrollbar.config(command=self.equity_tree.yview)
+        scrollbar_y.config(command=self.equity_tree.yview)
+        scrollbar_x.config(command=self.equity_tree.xview)
 
         self.equity_tree.heading('Equity', text='Equity', anchor='w')
         self.equity_tree.heading('Closed P/L', text='Closed P/L (₹)', anchor='e')
@@ -381,12 +391,15 @@ class ReportsTab:
         filter_frame = ttk.LabelFrame(parent, text="📊 Filters", style="Report.TLabelframe")
         filter_frame.pack(fill='x', pady=(0, 20))
 
-        row0 = ttk.Frame(filter_frame)
-        row0.pack(fill='x', pady=(0, 10))
+        self.profile_filter_container = ttk.Frame(filter_frame)
+        self.profile_filter_container.pack(fill='x', pady=(0, 0))
 
-        ttk.Label(row0, text="Profiles (combined view):", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+        self.profile_filter_row = ttk.Frame(self.profile_filter_container)
+        self.profile_filter_row.pack(fill='x', pady=(0, 10))
 
-        profile_frame = ttk.Frame(row0)
+        ttk.Label(self.profile_filter_row, text="Profiles (combined view):", font=('Arial', 10)).pack(side='left', padx=(0, 5))
+
+        profile_frame = ttk.Frame(self.profile_filter_row)
         profile_frame.pack(side='left', padx=5)
 
         profile_scroll = ttk.Scrollbar(profile_frame, orient='vertical')
@@ -429,7 +442,7 @@ class ReportsTab:
         self.profile_listbox.bind('<Button-1>', _on_profile_mouse_down)
         self.profile_listbox.bind('<B1-Motion>', _on_profile_drag)
 
-        profile_btns = ttk.Frame(row0)
+        profile_btns = ttk.Frame(self.profile_filter_row)
         profile_btns.pack(side='left', padx=(10, 0))
 
         ttk.Button(
@@ -446,7 +459,7 @@ class ReportsTab:
             width=12
         ).pack(anchor='w')
 
-        ttk.Label(row0, text="(Combined view only)", font=('Arial', 8), foreground='gray').pack(
+        ttk.Label(self.profile_filter_row, text="(Combined view only)", font=('Arial', 8), foreground='gray').pack(
             side='left', padx=(10, 0)
         )
 
@@ -661,8 +674,12 @@ class ReportsTab:
         )
         self.net_label.pack(side='left')
 
+        # Container for Profile breakdown to preserve order when hiding/showing
+        self.profile_breakdown_container = ttk.Frame(parent)
+        self.profile_breakdown_container.pack(fill='x', pady=(0, 0))
+
         # Profile breakdown (used in Combined Family view)
-        self.profile_breakdown_frame = ttk.LabelFrame(parent, text="👪 Profile Breakdown", padding="10")
+        self.profile_breakdown_frame = ttk.LabelFrame(self.profile_breakdown_container, text="👪 Profile Breakdown", padding="10")
         self.profile_breakdown_frame.pack(fill='x', pady=(10, 10))
 
         breakdown_header = ttk.Frame(self.profile_breakdown_frame)
@@ -679,12 +696,23 @@ class ReportsTab:
         self.profile_breakdown_mode_entry.pack(side='left', padx=(6, 0))
         self.profile_breakdown_mode_entry.bind('<<ComboboxSelected>>', lambda _e: self._refresh_profile_breakdown())
 
-        self.profile_tree = ttk.Treeview(self.profile_breakdown_frame, columns=('Profile', 'Value'), show='headings', height=4)
+        tree_frame = ttk.Frame(self.profile_breakdown_frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        scrollbar_y = ttk.Scrollbar(tree_frame, orient='vertical')
+        scrollbar_y.pack(side='right', fill='y')
+        
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+
+        self.profile_tree = ttk.Treeview(tree_frame, columns=('Profile', 'Value'), show='headings', height=4, yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        scrollbar_y.config(command=self.profile_tree.yview)
+        scrollbar_x.config(command=self.profile_tree.xview)
         self.profile_tree.heading('Profile', text='Profile')
         self.profile_tree.heading('Value', text='Net P/L (₹)')
         self.profile_tree.column('Profile', width=200, anchor='w')
         self.profile_tree.column('Value', width=120, anchor='e')
-        self.profile_tree.pack(fill='x')
+        self.profile_tree.pack(fill='both', expand=True)
 
     def create_analytics_section(self, parent: ttk.Frame) -> None:
         """Create analytics section for win/loss ratio and holding period."""
@@ -746,9 +774,29 @@ class ReportsTab:
 
             try:
                 from core import db_operations
-                profiles = db_operations.get_active_profiles()
-                profile_names = [p[1] for p in profiles]
+                all_profiles = db_operations.get_active_profiles()
+                current_active_ids = list(_config.ACTIVE_PROFILE_IDS)
+                
+                # Filter profiles to only those currently active (or all if current_active_ids is empty)
+                if current_active_ids:
+                    display_profiles = [p for p in all_profiles if p[0] in current_active_ids]
+                else:
+                    display_profiles = all_profiles
+                
+                profile_names = [p[1] for p in display_profiles]
                 self._set_profile_listbox_values(["All"] + profile_names)
+                
+                # Show/hide profile controls based on number of display profiles
+                if len(display_profiles) <= 1:
+                    if hasattr(self, 'profile_filter_row'):
+                        self.profile_filter_row.pack_forget()
+                    if hasattr(self, 'profile_breakdown_frame'):
+                        self.profile_breakdown_frame.pack_forget()
+                else:
+                    if hasattr(self, 'profile_filter_row'):
+                        self.profile_filter_row.pack(fill='x', pady=(0, 10))
+                    if hasattr(self, 'profile_breakdown_frame'):
+                        self.profile_breakdown_frame.pack(fill='x', pady=(10, 10))
             except Exception:
                 pass
 
@@ -933,6 +981,13 @@ class ReportsTab:
             self.filtered_open_positions = self._filter_open_positions(self.open_positions)
             equities = ["All"] + get_unique_equities(trades_by_id)
             self._set_equity_listbox_values(equities)
+            
+            type1s = ["All"] + get_unique_type1s(trades_by_id)
+            if hasattr(self, 'type1_filter_entry'):
+                current_type1 = self.type1_filter_var.get()
+                self.type1_filter_entry['values'] = type1s
+                if current_type1 not in type1s:
+                    self.type1_filter_var.set("All")
 
             equity_pnl_totals = aggregate_pnl_by_equity(filtered_pnl_results, trades_by_id, pnl_field="net_pnl")
             self.equity_pnl = self._convert_to_pnl_breakdown(equity_pnl_totals)
@@ -1549,8 +1604,11 @@ class ReportsTab:
             table_frame = ttk.Frame(self.open_positions_frame)
             table_frame.pack(fill='both', expand=True)
 
-            scrollbar = ttk.Scrollbar(table_frame)
-            scrollbar.pack(side='right', fill='y')
+            scrollbar_y = ttk.Scrollbar(table_frame, orient='vertical')
+            scrollbar_y.pack(side='right', fill='y')
+
+            scrollbar_x = ttk.Scrollbar(table_frame, orient='horizontal')
+            scrollbar_x.pack(side='bottom', fill='x')
 
             columns = (
                 'Equity', 'Type1', 'Type2', 'Strike', 'Expiry',
@@ -1561,9 +1619,11 @@ class ReportsTab:
                 columns=columns,
                 show='headings',
                 height=8,
-                yscrollcommand=scrollbar.set
+                yscrollcommand=scrollbar_y.set,
+                xscrollcommand=scrollbar_x.set
             )
-            scrollbar.config(command=self.open_tree.yview)
+            scrollbar_y.config(command=self.open_tree.yview)
+            scrollbar_x.config(command=self.open_tree.xview)
 
             self.open_tree.heading('Equity', text='Equity', anchor='w')
             self.open_tree.heading('Type1', text='Type1', anchor='center')

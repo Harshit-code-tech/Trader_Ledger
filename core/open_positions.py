@@ -180,3 +180,23 @@ def get_unique_equities(trades_by_id: dict[int, TradeDict]) -> list[str]:
             equities.add(trade['equity'])
     
     return sorted(list(equities))
+
+
+def get_unique_type1s(trades_by_id: dict[int, TradeDict]) -> list[str]:
+    """
+    Get list of unique type1 values from trades.
+    Useful for populating type1 dropdown filter.
+    
+    Args:
+        trades_by_id: Dict of trade_id -> trade data
+    
+    Returns:
+        Sorted list of unique type1 values
+    """
+    type1s = set()
+    for trade in trades_by_id.values():
+        val = trade.get('type1')
+        if val:
+            type1s.add(val.strip().lower())
+    
+    return sorted(list(type1s))

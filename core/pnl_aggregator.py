@@ -145,6 +145,26 @@ def aggregate_pnl_by_equity(
     return dict(equity_totals)
 
 
+def aggregate_pnl_by_type1(
+    match_results: Sequence[Mapping[str, Any]],
+    trades_by_id: dict[int, TradeDict],
+    pnl_field: str = "realized_pnl"
+) -> dict[str, int]:
+    """
+    Aggregates realized P/L per type1 (e.g. delivery, intraday).
+    """
+    type1_totals: defaultdict[str, int] = defaultdict(int)
+    for match in match_results:
+        assert 'sell_id' in match and pnl_field in match, "Missing required fields in match record."
+        sell_id: int = int(match['sell_id'])
+        if sell_id not in trades_by_id:
+            raise PnlCalculationError(f"SELL trade_id {sell_id} not found for type1 aggregation")
+        sell_trade: TradeDict = trades_by_id[sell_id]
+        type1: str = sell_trade.get('type1') or "unknown"
+        type1_totals[type1.strip().lower()] += int(match[pnl_field])
+    return dict(type1_totals)
+
+
 def filter_matches_by_date_range(
     match_results: Sequence[Mapping[str, Any]], 
     trades_by_id: dict[int, TradeDict],

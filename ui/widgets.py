@@ -74,11 +74,14 @@ def create_treeview(
     columns: list[tuple[str, str, int, str]],  # (id, heading, width, anchor)
     height: int = 10
 ) -> tuple[ttk.Frame, ttk.Treeview]:
-    """Helper to create a standard Treeview with scrollbar."""
+    """Helper to create a standard Treeview with scrollbars."""
     tree_frame = ttk.Frame(parent)
     
-    scrollbar = ttk.Scrollbar(tree_frame)
-    scrollbar.pack(side='right', fill='y')
+    scrollbar_y = ttk.Scrollbar(tree_frame, orient='vertical')
+    scrollbar_y.pack(side='right', fill='y')
+    
+    scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+    scrollbar_x.pack(side='bottom', fill='x')
     
     col_ids = [c[0] for c in columns]
     tree = ttk.Treeview(
@@ -86,9 +89,11 @@ def create_treeview(
         columns=col_ids,
         show='headings',
         height=height,
-        yscrollcommand=scrollbar.set
+        yscrollcommand=scrollbar_y.set,
+        xscrollcommand=scrollbar_x.set
     )
-    scrollbar.config(command=tree.yview)
+    scrollbar_y.config(command=tree.yview)
+    scrollbar_x.config(command=tree.xview)
     
     for col_id, heading, width, anchor in columns:
         tree.heading(col_id, text=heading, anchor=anchor)
@@ -96,6 +101,7 @@ def create_treeview(
         
     # Scrollwheel binding
     tree.bind('<MouseWheel>', lambda e: tree.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+    tree.bind('<Shift-MouseWheel>', lambda e: tree.xview_scroll(int(-1 * (e.delta / 120)), "units"))
     
     tree.pack(fill='both', expand=True)
     return tree_frame, tree
