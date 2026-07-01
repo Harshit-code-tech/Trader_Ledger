@@ -336,7 +336,7 @@ class TraderLedgerApp:
         if hasattr(self, 'add_trade_tab'):
             self.add_trade_tab.load_equity_dropdown()
             self.add_trade_tab.refresh_recent_trades()
-            self.add_trade_tab.update_sell_reference_fields()
+            self.add_trade_tab.update_close_reference_fields()
         if hasattr(self, 'view_records_tab'):
             self.view_records_tab.refresh_records()
         if hasattr(self, 'trade_view_tab'):

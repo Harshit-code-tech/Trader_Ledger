@@ -187,7 +187,7 @@ class ViewRecordsTab:
         # Treeview
         columns = (
             'ID', 'Date', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
-            'Qty', 'Price', 'Brokerage', 'Notes', 'Status'
+            'Qty', 'Price', 'Brokerage', 'Mtf_Amt', 'Mtf_Rate', 'Notes', 'Status'
         )
         self.records_tree = ttk.Treeview(
             table_frame,
@@ -218,6 +218,8 @@ class ViewRecordsTab:
         _make_heading('Qty', 'Qty')
         _make_heading('Price', 'Price (₹)')
         _make_heading('Brokerage', 'Brokerage (₹)')
+        _make_heading('Mtf_Amt', 'MTF Amt (₹)')
+        _make_heading('Mtf_Rate', 'MTF Rate (%)')
         _make_heading('Notes', 'Notes')
         _make_heading('Status', 'Status')
         
@@ -232,6 +234,8 @@ class ViewRecordsTab:
         self.records_tree.column('Qty', width=60, anchor='center')
         self.records_tree.column('Price', width=100, anchor='e')
         self.records_tree.column('Brokerage', width=100, anchor='e')
+        self.records_tree.column('Mtf_Amt', width=90, anchor='e')
+        self.records_tree.column('Mtf_Rate', width=90, anchor='e')
         self.records_tree.column('Notes', width=200, anchor='w')
         self.records_tree.column('Status', width=80, anchor='center')
         
@@ -376,7 +380,7 @@ class ViewRecordsTab:
             # Build query based on filters
             query = """
                 SELECT id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-                       quantity, price, brokerage, notes, is_active
+                       quantity, price, brokerage, mtf_amount, mtf_rate_ppm, notes, is_active
                 FROM trade_events
                 WHERE 1=1
             """
@@ -443,7 +447,7 @@ class ViewRecordsTab:
             # Populate table
             for trade in trades:
                 (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-                 quantity, price_paise, brokerage_paise, notes, is_active) = trade
+                 quantity, price_paise, brokerage_paise, mtf_amount_paise, mtf_rate_ppm, notes, is_active) = trade
                 
                 # Format date DD-MM-YYYY
                 year, month, day = trade_date.split('-')
@@ -461,6 +465,8 @@ class ViewRecordsTab:
                     year_e, month_e, day_e = expiry.split('-')
                     expiry_display = f"{day_e}-{month_e}-{year_e}"
 
+                mtf_rate_display = f"{(mtf_rate_ppm / 10000):.2f}" if mtf_rate_ppm is not None else ""
+
                 # Insert into tree
                 item = self.records_tree.insert('', 'end', values=(
                     trade_id,
@@ -474,6 +480,8 @@ class ViewRecordsTab:
                     quantity,
                     format_money(price_paise),
                     format_money(brokerage_paise),
+                    format_money(mtf_amount_paise or 0),
+                    mtf_rate_display,
                     notes[:50] + "..." if len(notes) > 50 else notes,
                     status
                 ))
@@ -563,7 +571,7 @@ class ViewRecordsTab:
         where_clause, params = self._build_trade_filters()
         query = (
             "SELECT id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry, "
-            "quantity, price, brokerage, brokerage_auto, brokerage_override, mtf_amount, notes, is_active "
+            "quantity, price, brokerage, brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm, notes, is_active "
             f"FROM trade_events{where_clause} ORDER BY id DESC"
         )
 
@@ -634,7 +642,7 @@ class ViewRecordsTab:
         
         item = self.records_tree.item(selection[0])
         trade_id = item['values'][0]
-        status = item['values'][12]  # Status column
+        status = item['values'][14]  # Status column
         
         # Prevent editing deleted trades
         if status == "Deleted":
@@ -654,7 +662,7 @@ class ViewRecordsTab:
             c.execute("""
                 SELECT trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                        quantity, price, brokerage, brokerage_auto, brokerage_override,
-                       mtf_amount, notes, is_active
+                       mtf_amount, mtf_rate_ppm, notes, is_active
                 FROM trade_events
                 WHERE id = ?
             """, (trade_id,))
@@ -735,12 +743,12 @@ class ViewRecordsTab:
 
         item = self.records_tree.item(selection[0])
         values = item.get('values', ())
-        if len(values) < 13:
+        if len(values) < 15:
             messagebox.showwarning("Invalid Selection", "Please select a trade row to restore")
             return
 
         trade_id = values[0]
-        status = values[12]
+        status = values[14]
         trade_info = f"{values[3]} {values[8]} {values[2]} on {values[1]}"
 
         if status != "Deleted":
@@ -894,12 +902,14 @@ class ViewRecordsTab:
         # Update heading visuals (arrow)
         arrow = ' ▲' if self._records_sort_state[col] else ' ▼'
         # Reset all headings
-        for c in self._records_sort_state.keys():
+        for c in self.records_tree['columns']:
             text = c
             if c == 'Price':
                 text = 'Price (₹)'
             elif c == 'Brokerage':
                 text = 'Brokerage (₹)'
+            elif c == 'Mtf_Amt':
+                text = 'MTF Amt (₹)'
             self.records_tree.heading(c, text=text)
         # Set arrow
         display = col
@@ -907,6 +917,8 @@ class ViewRecordsTab:
             display = 'Price (₹)'
         elif col == 'Brokerage':
             display = 'Brokerage (₹)'
+        elif col == 'Mtf_Amt':
+            display = 'MTF Amt (₹)'
         self.records_tree.heading(col, text=display + arrow)
     
     def update_inline_edit(self, item: str, col_index: int, col_name: str, new_value: str) -> None:
@@ -925,6 +937,8 @@ class ViewRecordsTab:
                 'Qty': ('quantity', 'int'),
                 'Price': ('price', 'money'),
                 'Brokerage': ('brokerage', 'money'),
+                'Mtf_Amt': ('mtf_amount', 'money'),
+                'Mtf_Rate': ('mtf_rate_ppm', 'rate'),
                 'Notes': ('notes', 'text')
             }
             
@@ -943,6 +957,9 @@ class ViewRecordsTab:
             elif value_type == 'money':
                 # Convert rupees to paise
                 db_value = int(float(new_value) * 100)
+            elif value_type == 'rate':
+                # Convert % to ppm
+                db_value = int(float(new_value) * 10000)
             elif value_type == 'text':
                 db_value = new_value.strip().upper() if col_name in ('Stock', 'Type') else new_value.strip()
             else:
@@ -989,6 +1006,7 @@ Optional Columns:
 • Brokerage (in rupees, default 0)
 • BrokerageOverride (in rupees, optional)
 • MtfAmount (in rupees, required for MTF BUY only)
+• MtfRate (in %, e.g. 9.65, optional for MTF BUY)
 • TradeTS (YYYY-MM-DD HH:MM:SS, optional IST timestamp)
 • Notes (any text)
 • Type1 (intraday/delivery/mtf/futures/options)
@@ -998,9 +1016,9 @@ Optional Columns:
 
 Example CSV:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
-20-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-20 09:30:00,Sample trade,delivery,,,
-21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,2026-01-21 10:05:00,Another trade,intraday,,,
+Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,MtfRate,TradeTS,Notes,Type1,Type2,Strike,Expiry
+20-01-2026,TCS,BUY,10,350.50,10.00,,0,,2026-01-20 09:30:00,Sample trade,delivery,,,
+21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,,2026-01-21 10:05:00,Another trade,intraday,,,
 22-01-2026,NIFTY,BUY,50,12.00,2.00,,0,2026-01-22 11:00:00,Options entry,options,CE,22500,25-01-2026
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1123,6 +1141,13 @@ Tips:
                                 if mtf_amount_rupees < 0:
                                     raise ValueError("MTF amount must be >= 0")
                                 mtf_amount_paise = int(mtf_amount_rupees * 100)
+                                
+                            mtf_rate_ppm = None
+                            if 'MtfRate' in row and row['MtfRate'].strip():
+                                mtf_rate_percent = float(row['MtfRate'])
+                                if mtf_rate_percent < 0:
+                                    raise ValueError("MTF rate must be >= 0")
+                                mtf_rate_ppm = int(mtf_rate_percent * 10000)
 
                             notes = row.get('Notes', '').strip()
 
@@ -1179,13 +1204,13 @@ Tips:
                             cursor.execute("""
                                 INSERT INTO trade_events (
                                     trade_date, equity, trade_type, quantity, price, brokerage,
-                                    brokerage_auto, brokerage_override, mtf_amount, trade_ts, notes,
+                                    brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm, trade_ts, notes,
                                     type1, type2, strike, expiry, is_active, profile_id
                                 )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                             """, (
                                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
-                                brokerage_auto, brokerage_override, mtf_amount_paise, trade_ts, notes,
+                                brokerage_auto, brokerage_override, mtf_amount_paise, mtf_rate_ppm, trade_ts, notes,
                                 type1, type2, strike, expiry, profile_id
                             ))
 
@@ -1238,13 +1263,13 @@ Tips:
                     'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
                     'Qty', 'PriceRupees', 'PricePaise',
                     'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
-                    'MtfAmountRupees', 'MtfAmountPaise', 'Notes', 'Status'
+                    'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status'
                 ])
 
                 for row in rows:
                     (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                      quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
-                     mtf_amount_paise, notes, is_active) = row
+                     mtf_amount_paise, mtf_rate_ppm, notes, is_active) = row
 
                     display_date = ""
                     if trade_date:
@@ -1275,6 +1300,7 @@ Tips:
                         "" if brokerage_override is None else int(brokerage_override),
                         f"{(mtf_amount_paise or 0) / 100:.2f}",
                         int(mtf_amount_paise or 0),
+                        f"{(mtf_rate_ppm / 10000):.2f}" if mtf_rate_ppm is not None else "",
                         notes or "",
                         "Active" if is_active == 1 else "Deleted"
                     ])
@@ -1327,7 +1353,7 @@ Tips:
                 'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
                 'Qty', 'PriceRupees', 'PricePaise',
                 'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
-                'MtfAmountRupees', 'MtfAmountPaise', 'Notes', 'Status'
+                'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status'
             ]
             ws.append(headers)
             
@@ -1344,7 +1370,7 @@ Tips:
             for row in rows:
                 (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                  quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
-                 mtf_amount_paise, notes, is_active) = row
+                 mtf_amount_paise, mtf_rate_ppm, notes, is_active) = row
 
                 display_date = ""
                 if trade_date:
@@ -1375,6 +1401,7 @@ Tips:
                     "" if brokerage_override is None else int(brokerage_override),
                     float((mtf_amount_paise or 0) / 100),
                     int(mtf_amount_paise or 0),
+                    float(mtf_rate_ppm / 10000) if mtf_rate_ppm is not None else "",
                     notes or "",
                     "Active" if is_active == 1 else "Deleted"
                 ])
@@ -1513,7 +1540,7 @@ class EditTradeDialog:
         # Unpack trade data
         (trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
          quantity, price_paise, brokerage_paise, _brokerage_auto, brokerage_override,
-         mtf_amount_paise, notes, _) = trade_data
+         mtf_amount_paise, mtf_rate_ppm, notes, _) = trade_data
         
         # Convert for display
         price_rupees = price_paise / 100
@@ -1645,6 +1672,14 @@ class EditTradeDialog:
         self.mtf_amount_entry.insert(0, f"{mtf_amount_rupees:.2f}")
         row += 1
         
+        # MTF rate
+        ttk.Label(main_frame, text="MTF Rate (%):", font=('Arial', 10)).grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.mtf_rate_entry = ttk.Entry(main_frame, width=25)
+        self.mtf_rate_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        if mtf_rate_ppm is not None:
+            self.mtf_rate_entry.insert(0, f"{(mtf_rate_ppm / 10000):.2f}")
+        row += 1
+        
         # Notes
         ttk.Label(main_frame, text="Notes:", font=('Arial', 10)).grid(row=row, column=0, sticky='ne', padx=5, pady=8)
         self.notes_entry = tk.Text(main_frame, width=30, height=3, font=('Arial', 10))
@@ -1753,6 +1788,11 @@ class EditTradeDialog:
             mtf_amount_rupees = float(self.mtf_amount_entry.get() or 0)
             mtf_amount_paise = int(mtf_amount_rupees * 100)
 
+            mtf_rate_val = self.mtf_rate_entry.get().strip()
+            mtf_rate_ppm = None
+            if mtf_rate_val:
+                mtf_rate_ppm = int(float(mtf_rate_val) * 10000)
+
             if type1 == 'mtf' and trade_type == 'BUY':
                 if mtf_amount_paise <= 0:
                     messagebox.showerror("Invalid MTF Amount", "MTF amount is required for MTF BUY trades")
@@ -1773,12 +1813,12 @@ class EditTradeDialog:
                 UPDATE trade_events
                 SET trade_date = ?, trade_ts = ?, equity = ?, trade_type = ?, type1 = ?, type2 = ?,
                     strike = ?, expiry = ?, quantity = ?, price = ?, brokerage = ?,
-                    brokerage_auto = ?, brokerage_override = ?, mtf_amount = ?, notes = ?
+                    brokerage_auto = ?, brokerage_override = ?, mtf_amount = ?, mtf_rate_ppm = ?, notes = ?
                 WHERE id = ?
             """, (
                 trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                 quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
-                mtf_amount_paise, notes, self.trade_id
+                mtf_amount_paise, mtf_rate_ppm, notes, self.trade_id
             ))
             conn.commit()
             conn.close()

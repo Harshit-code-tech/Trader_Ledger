@@ -48,13 +48,13 @@ class AddTradeTab:
         logger.info("Initializing Add Trade tab")
         self.parent = parent
         self.update_status = status_callback
-        self.sell_reference_meta: dict[str, dict[str, int]] = {}
+        self.close_reference_meta: dict[str, dict[str, int]] = {}
         self.equity_values: list[str] = []
         
         # Create UI
         self.create_widgets()
         self.update_derivative_fields()
-        self.update_sell_reference_fields()
+        self.update_close_reference_fields()
         
         # Set default date to today (only for text entry fallback)
         if not CALENDAR_AVAILABLE:
@@ -121,7 +121,7 @@ class AddTradeTab:
         ttk.Label(main_frame, text="(e.g., TCS, RELIANCE)", font=('Consolas', 9), foreground='gray').grid(row=row, column=2, sticky='w', padx=5)
         self.load_equity_dropdown()
         self.equity_entry.bind('<KeyRelease>', self._filter_equity_suggestions)
-        self.equity_var.trace_add('write', lambda *_: self.update_sell_reference_fields())
+        self.equity_var.trace_add('write', lambda *_: self.update_close_reference_fields())
         row += 1
         
         # Trade Type
@@ -131,7 +131,7 @@ class AddTradeTab:
         type_frame.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         ttk.Radiobutton(type_frame, text="BUY", variable=self.trade_type_var, value='BUY').pack(side='left', padx=5)
         ttk.Radiobutton(type_frame, text="SELL", variable=self.trade_type_var, value='SELL').pack(side='left', padx=5)
-        self.trade_type_var.trace_add('write', lambda *_: self.update_sell_reference_fields())
+        self.trade_type_var.trace_add('write', lambda *_: self.update_close_reference_fields())
         row += 1
 
         # Type1 (classification)
@@ -165,7 +165,7 @@ class AddTradeTab:
         self.type2_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.type2_hint = ttk.Label(main_frame, text="(CE/PE for options)", font=('Consolas', 9), foreground='gray')
         self.type2_hint.grid(row=row, column=2, sticky='w', padx=5)
-        self.type2_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_sell_reference_fields())
+        self.type2_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_close_reference_fields())
         row += 1
 
         # Strike (options only)
@@ -175,7 +175,7 @@ class AddTradeTab:
         self.strike_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
         self.strike_hint = ttk.Label(main_frame, text="(options only)", font=('Consolas', 9), foreground='gray')
         self.strike_hint.grid(row=row, column=2, sticky='w', padx=5)
-        self.strike_entry.bind('<FocusOut>', lambda _e: self.update_sell_reference_fields())
+        self.strike_entry.bind('<FocusOut>', lambda _e: self.update_close_reference_fields())
         row += 1
 
         # Expiry (options/futures)
@@ -195,35 +195,36 @@ class AddTradeTab:
             self.expiry_entry.delete(0, 'end')
             self.expiry_hint = ttk.Label(main_frame, text="", font=('Consolas', 9))
             self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
-            self.expiry_entry.bind('<<DateEntrySelected>>', lambda _e: self.update_sell_reference_fields())
+            self.expiry_entry.bind('<<DateEntrySelected>>', lambda _e: self.update_close_reference_fields())
         else:
             self.expiry_entry = ttk.Entry(main_frame, width=20, font=('Consolas', 10))
             self.expiry_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
             self.expiry_hint = ttk.Label(main_frame, text="(DD-MM-YYYY)", font=('Consolas', 9), foreground='gray')
             self.expiry_hint.grid(row=row, column=2, sticky='w', padx=5)
-            self.expiry_entry.bind('<FocusOut>', lambda _e: self.update_sell_reference_fields())
+            self.expiry_entry.bind('<FocusOut>', lambda _e: self.update_close_reference_fields())
         row += 1
 
-        # Sell reference (SELL only)
-        self.sell_ref_label = ttk.Label(main_frame, text="Sell Against:", font=('Consolas', 10))
-        self.sell_ref_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
-        self.sell_ref_var = tk.StringVar()
-        self.sell_ref_entry = ttk.Combobox(
+        # Close reference (Optional Preview)
+        self.close_ref_frame = ttk.LabelFrame(main_frame, text="Close Reference (Optional Preview)", padding="10")
+        self.close_ref_label = ttk.Label(main_frame, text="Close Against:", font=('Consolas', 10))
+        self.close_ref_label.grid(row=row, column=0, sticky='e', padx=5, pady=8)
+        self.close_ref_var = tk.StringVar()
+        self.close_ref_entry = ttk.Combobox(
             main_frame,
-            textvariable=self.sell_ref_var,
+            textvariable=self.close_ref_var,
             width=28,
             state='readonly',
             font=('Consolas', 10)
         )
-        self.sell_ref_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
-        self.sell_ref_hint = ttk.Label(
+        self.close_ref_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
+        self.close_ref_hint = ttk.Label(
             main_frame,
             text="(reference only; FIFO applies)",
             font=('Consolas', 9),
             foreground='gray'
         )
-        self.sell_ref_hint.grid(row=row, column=2, sticky='w', padx=5)
-        self.sell_ref_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_price_preview())
+        self.close_ref_hint.grid(row=row, column=2, sticky='w', padx=5)
+        self.close_ref_entry.bind('<<ComboboxSelected>>', lambda _e: self.update_price_preview())
         row += 1
         
         # Quantity
@@ -262,7 +263,7 @@ class AddTradeTab:
         row += 1
 
         # Real-time P/L preview (updates when SELL reference, qty, price or brokerage change)
-        self.pnl_preview_label = ttk.Label(main_frame, text="", font=('Consolas', 10), foreground='#34495e')
+        self.pnl_preview_label = ttk.Label(main_frame, text="", font=('Consolas', 10, 'bold'), foreground='#34495e')
         self.pnl_preview_label.grid(row=row, column=1, sticky='w', padx=5, pady=(0, 8))
         row += 1
 
@@ -379,22 +380,53 @@ class AddTradeTab:
 
         self._update_mtf_amount_visibility()
         self.update_brokerage_state()
-        self.update_sell_reference_fields()
+        self.update_close_reference_fields()
 
-    def update_sell_reference_fields(self) -> None:
-        """Show or hide SELL reference selector and refresh options."""
-        if self.trade_type_var.get() != 'SELL':
-            self.sell_ref_label.grid_remove()
-            self.sell_ref_entry.grid_remove()
-            self.sell_ref_hint.grid_remove()
-            self.sell_ref_var.set('')
-            self._update_mtf_amount_visibility()
-            return
-
-        self.sell_ref_label.grid()
-        self.sell_ref_entry.grid()
-        self.sell_ref_hint.grid()
-        self.load_sell_reference_options()
+    def update_close_reference_fields(self) -> None:
+        """Show or hide Close Reference based on product rules.
+        
+        Visibility logic:
+        - Delivery/MTF + BUY: Hide (BUY always opens, never closes)
+        - Delivery/MTF + SELL: Show (SELL always closes against open BUY lots)
+        - Intraday/Futures/Options + BUY: Show (BUY could close a short)
+        - Intraday/Futures/Options + SELL: Show (SELL could close a long)
+        
+        The dropdown loads open lots of the OPPOSITE trade type.
+        If no open opposite lots exist, the dropdown is empty but still visible
+        (for products that allow short/long opening).
+        """
+        trade_type = self.trade_type_var.get()
+        type1 = self.type1_var.get().strip().lower()
+        
+        # Determine if the current trade type could possibly be closing
+        try:
+            from core.trading_rules import can_sell_open
+            product_allows_short = can_sell_open(type1)
+        except (ValueError, Exception):
+            product_allows_short = False
+        
+        # For Delivery/MTF: BUY is ALWAYS opening → no close reference needed
+        # For Delivery/MTF: SELL is ALWAYS closing → show close reference
+        # For Intraday/Futures/Options: either direction could close → always show
+        should_show = True
+        if not product_allows_short:
+            # Product is Delivery or MTF (can_sell_open=False)
+            if trade_type == 'BUY':
+                should_show = False  # BUY always opens for these products
+        
+        if should_show:
+            self.close_ref_label.grid()
+            self.close_ref_entry.grid()
+            self.close_ref_hint.grid()
+            self.load_close_reference_options()
+        else:
+            self.close_ref_label.grid_remove()
+            self.close_ref_entry.grid_remove()
+            self.close_ref_hint.grid_remove()
+            self.close_ref_var.set('')
+            self.close_reference_meta = {}
+            self.pnl_preview_label.config(text="")
+        
         self.update_brokerage_state()
         self._update_mtf_amount_visibility()
 
@@ -485,11 +517,11 @@ class AddTradeTab:
             return type1, '', '', expiry
         return type1, type2, strike, expiry
 
-    def load_sell_reference_options(self) -> None:
-        """Load open BUY lots for the selected contract (reference only)."""
-        self.sell_reference_meta = {}
-        self.sell_ref_entry['values'] = []
-        self.sell_ref_var.set('')
+    def load_close_reference_options(self) -> None:
+        """Load open lots of the opposite trade type for the selected contract (reference only)."""
+        self.close_reference_meta = {}
+        self.close_ref_entry['values'] = []
+        self.close_ref_var.set('')
 
         equity = self.equity_entry.get().strip().upper()
         if not equity:
@@ -511,15 +543,19 @@ class AddTradeTab:
             trades = fetch_active_trades()
             matches = match_fifo(trades) or []
         except FifoMatchError as exc:
-            logger.warning(f"Could not load SELL references: {str(exc)}")
+            logger.warning(f"Could not load Close references: {str(exc)}")
             return
         except Exception as exc:
-            logger.warning(f"Could not load SELL references: {str(exc)}")
+            logger.warning(f"Could not load Close references: {str(exc)}")
             return
 
-        matched_by_buy: dict[int, int] = defaultdict(int)
+        matched_by_trade: dict[int, int] = defaultdict(int)
         for match in matches:
-            matched_by_buy[match['buy_id']] += match['matched_quantity']
+            matched_by_trade[match['buy_id']] += match['matched_quantity']
+            matched_by_trade[match['sell_id']] += match['matched_quantity']
+
+        current_trade_type = self.trade_type_var.get()
+        opposite_type = 'SELL' if current_trade_type == 'BUY' else 'BUY'
 
         options: list[tuple[str, str]] = []
         for trade in trades:
@@ -527,14 +563,14 @@ class AddTradeTab:
              trade_type2, trade_strike, trade_expiry, quantity, price_paise,
              _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount, _mtf_rate_ppm) = trade
 
-            if trade_type != 'BUY':
+            if trade_type != opposite_type:
                 continue
             if trade_equity.strip().upper() != equity:
                 continue
             if trade_type1 != type1 or trade_type2 != type2 or trade_strike != strike or trade_expiry != expiry:
                 continue
 
-            matched_qty = matched_by_buy.get(trade_id, 0)
+            matched_qty = matched_by_trade.get(trade_id, 0)
             remaining = quantity - matched_qty
             if remaining <= 0:
                 continue
@@ -542,42 +578,41 @@ class AddTradeTab:
             year, month, day = trade_date.split('-')
             display_date = f"{day}-{month}-{year}"
             price_display = format_money_abs(price_paise)
-            option_label = f"BUY #{trade_id} | {display_date} | Rem {remaining} | {price_display}"
-            # Store additional metadata for preview calculation
-            self.sell_reference_meta[option_label] = {
-                'buy_id': trade_id,
+            option_label = f"{trade_type} #{trade_id} | {display_date} | Rem {remaining} | {price_display}"
+            
+            self.close_reference_meta[option_label] = {
+                'id': trade_id,
+                'trade_type': trade_type,
                 'remaining_qty': remaining,
-                'buy_price_paise': price_paise,
-                'buy_brokerage_paise': _brokerage,
-                'buy_qty': quantity
+                'price_paise': price_paise,
+                'brokerage_paise': _brokerage,
+                'qty': quantity
             }
             options.append((trade_date, option_label))
 
         options.sort(key=lambda item: item[0])
-        self.sell_ref_entry['values'] = [label for _date, label in options]
-        # Update preview after loading options
+        self.close_ref_entry['values'] = [label for _date, label in options]
+        
         try:
             self.update_price_preview()
         except Exception:
             pass
 
-    def _get_selected_sell_reference(self) -> dict[str, int] | None:
-        """Return selected SELL reference metadata if available."""
-        selected = self.sell_ref_var.get().strip()
+    def _get_selected_close_reference(self) -> dict[str, int] | None:
+        """Return selected Close reference metadata if available."""
+        selected = self.close_ref_var.get().strip()
         if not selected:
             return None
-        return self.sell_reference_meta.get(selected)
+        if not hasattr(self, 'close_reference_meta'):
+            return None
+        return self.close_reference_meta.get(selected)
 
     def update_price_preview(self) -> None:
-        """Update the estimated P/L preview for a SELL trade based on selected reference."""
+        """Update the estimated P/L preview based on selected reference."""
         try:
-            if self.trade_type_var.get() != 'SELL':
-                self.pnl_preview_label.config(text="")
-                return
-
-            selected = self._get_selected_sell_reference()
+            selected = self._get_selected_close_reference()
             if not selected:
-                self.pnl_preview_label.config(text="Select a BUY lot to preview P/L")
+                self.pnl_preview_label.config(text="")
                 return
 
             qty_text = self.quantity_entry.get().strip()
@@ -593,30 +628,34 @@ class AddTradeTab:
                 return
 
             try:
-                sell_price_paise = int(float(price_text) * 100)
+                current_price_paise = int(float(price_text) * 100)
             except Exception:
                 self.pnl_preview_label.config(text="Enter valid Price to preview P/L")
                 return
 
             try:
-                sell_brokerage_paise = int(float(brokerage_text) * 100)
+                current_brokerage_paise = int(float(brokerage_text) * 100)
             except Exception:
-                sell_brokerage_paise = 0
+                current_brokerage_paise = 0
 
             # Cap qty at remaining
             remaining = selected.get('remaining_qty', 0)
             use_qty = min(qty, remaining)
 
-            buy_price_paise = selected.get('buy_price_paise', 0)
-            buy_brokerage_paise = selected.get('buy_brokerage_paise', 0)
-            buy_qty = selected.get('buy_qty', 1)
+            open_price_paise = selected.get('price_paise', 0)
+            open_brokerage_paise = selected.get('brokerage_paise', 0)
+            open_qty = selected.get('qty', 1)
+            
+            matched_open_brokerage = (open_brokerage_paise * use_qty) // open_qty if open_qty else 0
 
-            # Proportion of buy brokerage attributable to matched quantity
-            matched_buy_brokerage = (buy_brokerage_paise * use_qty) // buy_qty if buy_qty else 0
+            # Logic: If we are selling, we are closing a long. If we are buying, we are closing a short.
+            # PnL = (Sell Value - Buy Cost) - total_brokerage
+            if self.trade_type_var.get() == 'SELL':
+                pnl_paise = (current_price_paise - open_price_paise) * use_qty - (current_brokerage_paise + matched_open_brokerage)
+            else:
+                # We are buying to cover a short
+                pnl_paise = (open_price_paise - current_price_paise) * use_qty - (current_brokerage_paise + matched_open_brokerage)
 
-            pnl_paise = (sell_price_paise - buy_price_paise) * use_qty - (sell_brokerage_paise + matched_buy_brokerage)
-
-            # Format
             sign = '-' if pnl_paise < 0 else '+'
             self.pnl_preview_label.config(text=f"Estimated realized P/L for {use_qty} units: {sign} {format_money(abs(pnl_paise))}")
 
@@ -703,8 +742,8 @@ class AddTradeTab:
             'classification': (type1, type2, strike, expiry),
             'mtf_amount': self.mtf_amount_entry.get().strip(),
             'mtf_rate_pct': self.mtf_rate_entry.get().strip(),
-            'selected_sell_reference': self._get_selected_sell_reference(),
-            'sell_reference_meta': self.sell_reference_meta,
+            'selected_close_reference': self._get_selected_close_reference(),
+            'close_reference_meta': getattr(self, 'close_reference_meta', {}),
             'notes': self.notes_entry.get('1.0', 'end-1c').strip()
         }
 
@@ -735,10 +774,25 @@ class AddTradeTab:
             equity = data['equity'].upper()
             price = data['price']
             
+            # Determine position state after saving for user feedback
+            position_info = self._get_position_state_info(equity, data.get('classification', ('', '', '', '')))
+            
             logger.info(f"✅ Trade saved successfully - ID: {trade_id}")
             self.update_status(f"✅ Trade saved: {trade_type} {quantity} {equity} @ ₹{price}")
-            messagebox.showinfo("Success", f"Trade saved successfully!\n\n{trade_type} {quantity} {equity}")
             
+            success_msg = f"Trade saved successfully!\n\n{trade_type} {quantity} {equity} @ ₹{price}"
+            if position_info:
+                success_msg += f"\n\n{position_info}"
+            messagebox.showinfo("Success", success_msg)
+            
+            # Update default MTF rate for subsequent trades in this session
+            mtf_rate_str = data.get('mtf_rate_pct', '').strip()
+            if mtf_rate_str:
+                try:
+                    self.default_mtf_rate_pct = float(mtf_rate_str)
+                except ValueError:
+                    pass
+
             self.refresh_recent_trades()
             self.load_equity_dropdown()
             self.clear_form()
@@ -746,6 +800,61 @@ class AddTradeTab:
             logger.error(f"❌ Failed to save trade: {str(e)}", exc_info=True)
             messagebox.showerror("Error", f"Failed to save trade:\n{str(e)}")
             self.update_status(f"❌ Error saving trade")
+
+    def _get_position_state_info(self, equity: str, classification: tuple) -> str:
+        """Query the Position State Engine for the current state of a contract after saving.
+        
+        Returns a human-readable summary like:
+          'Position: LONG 100 shares (open)'
+          'Position: SHORT 50 shares (open)'
+          'Position: FLAT (fully closed)'
+        """
+        try:
+            from core.position_state_engine import process_trades, NormalizedTradeEvent
+            from core.fifo_matcher import fetch_active_trades
+            from core.trade_validation import normalize_trade_classification
+            
+            type1_in, type2_in, strike_in, expiry_in = classification
+            type1, type2, strike, expiry = normalize_trade_classification(
+                type1_in, type2_in, strike_in, expiry_in, require_type1=True
+            )
+            
+            trades = fetch_active_trades()
+            if not trades:
+                return ""
+            
+            events = process_trades(trades)
+            
+            # Find the contract key for this equity + classification
+            contract_key = (equity.strip().upper(), type1, type2, strike, expiry)
+            
+            # Calculate net position from events
+            net = 0
+            last_event = None
+            for event in events:
+                if event.contract_key == contract_key:
+                    if event.original_direction.value == 'BUY':
+                        net += event.quantity
+                    else:
+                        net -= event.quantity
+                    last_event = event
+            
+            if last_event is None:
+                return ""
+            
+            # Determine the role of the LAST event (the one just saved)
+            role = last_event.event_role.value  # "OPENING" or "CLOSING"
+            side = last_event.position_side.value  # "LONG" or "SHORT"
+            
+            if net > 0:
+                return f"📊 Position: LONG {net} shares (open)\nLast trade: {role}"
+            elif net < 0:
+                return f"📊 Position: SHORT {abs(net)} shares (open)\nLast trade: {role}"
+            else:
+                return f"📊 Position: FLAT (fully closed)\nLast trade: {role}"
+        except Exception as exc:
+            logger.debug(f"Could not determine position state: {exc}")
+            return ""
 
     def refresh_recent_trades(self) -> None:
         """Load last 5 trades for display using Trade Manager."""
@@ -789,9 +898,12 @@ class AddTradeTab:
         self.strike_entry.delete(0, tk.END)
         self.expiry_entry.delete(0, tk.END)
         self.update_derivative_fields()
-        self.sell_ref_var.set('')
-        self.sell_reference_meta = {}
-        self.update_sell_reference_fields()
+        self.trade_type_var.set('BUY')
+        if hasattr(self, 'close_reference_meta'):
+            self.close_reference_meta = {}
+        self.close_ref_var.set('')
+        
+        self.update_close_reference_fields()
         self.quantity_entry.delete(0, tk.END)
         self.price_entry.delete(0, tk.END)
         self.brokerage_entry.delete(0, tk.END)

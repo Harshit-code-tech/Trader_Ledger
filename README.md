@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.6-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -15,23 +15,25 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Accurate FIFO Calculations** - Automatically matches sell orders with buy orders using First-In-First-Out logic
 - ✅ **Trade Management** - Record, edit, and delete BUY/SELL transactions with validation
 - ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
-- 🆕 **Smart Profile Filtering (v1.4.6)** - Dynamic filtering of active profiles and automatic UI cleanup for single-profile setups
-- 🆕 **Responsive Data Tables (v1.4.6)** - Added horizontal scrollbars to all data grids for better small-screen viewing
-- 🆕 **Dynamic Type Filtering (v1.4.6)** - Automatically fetches and populates available 'Type 1' fields for dynamic reports
+- 🆕 **Position State Engine (v1.5.0)** - Intelligent trade classification: each trade is automatically tagged as OPENING or CLOSING with flip-trade splitting
+- 🆕 **Open Position Filtering (v1.5.0)** - Filter and sort by open positions in Trade View
+- 🆕 **Analytics Help (v1.5.0)** - Interactive help button explaining all analytics metrics with infinity handling
+- 🆕 **Persistent MTF Rate (v1.5.0)** - Custom MTF rate persists across trades in the same session
 - 🆕 **Multi-Profile Selection (v1.4.3)** - Combined family view and per-profile tracking
 - 🆕 **Intraday Short-Selling (v1.4.3)** - Native FIFO support for Intraday shorting (Sell first, Buy later)
 - 🆕 **Auto Brokerage + MTF Interest (v1.2)** - Configurable auto brokerage and post-FIFO MTF interest support
 - 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
 
-## 🆕 What's New in v1.4.6
+## 🆕 What's New in v1.5.0
 
-Version 1.4.6 focuses on UI responsiveness, intelligent filtering, and overall user experience improvements:
+Version 1.5.0 introduces a Position State Engine, improved Trade View, and better analytics UX:
 
-- **Enhanced Table Usability:** All treeview data tables (Reports, View Records, Open Positions) now support horizontal scrolling, making the app much more usable in a minimized or side-by-side window layout.
-- **Smart Profile Visibility:** The Reports tab now intelligently detects if only one profile is active. If so, it hides the redundant 'Profiles (combined view)' filter and 'Profile Breakdown' table, keeping the UI clean.
-- **Dynamic Trade Type Filters:** The 'Type 1' filter in the Reports tab no longer uses hardcoded values. It now dynamically fetches all available types from your trades (e.g. intraday, delivery, mtf, futures), making it completely adaptable to your unique trading style.
-- **Active Profile Filtering:** The profile dropdown in Reports now correctly isolates to show *only* the profiles you've selected from the main Profile window, removing unnecessary clutter.
+- **Position State Engine:** Every trade is now automatically classified as OPENING or CLOSING. Flip trades (where a single trade reverses your position) are intelligently split into a closing portion and an opening portion, ensuring accurate FIFO matching.
+- **Open Position Filter in Trade View:** A new "Open Only" checkbox lets you quickly isolate open positions. A new "Status" sort option groups open positions first.
+- **Analytics Help Dialog:** An "ℹ️ What do these mean?" button in the Reports analytics section opens a rich, formatted popup explaining each metric—including why values like Win/Loss Ratio or Profit Factor may show as infinity.
+- **Persistent MTF Rate:** When you set a custom MTF rate for a trade, that value now carries over to subsequent trades in the same session until you change it again.
+- **Close Reference for Intraday/Futures/Options:** The "Close Against" dropdown now correctly shows open positions for all trade types, not just delivery.
 
 👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
 👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details

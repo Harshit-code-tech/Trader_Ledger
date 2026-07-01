@@ -4,6 +4,7 @@ from typing import TypedDict
 import config
 from core.trade_validation import normalize_trade_classification
 from core.brokerage import get_effective_brokerage
+from core.trading_rules import TradeDirection, EventRole
 
 DB_PATH = str(config.DB_PATH)
 
@@ -13,7 +14,7 @@ class FifoMatchError(Exception):
 
 
 # Type definitions
-class BuyQueueItem(TypedDict):
+class OpeningQueueItem(TypedDict):
     id: int
     remaining_quantity: int
 
@@ -70,12 +71,7 @@ def fetch_active_trades() -> list[TradeTuple]:
                brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm
         FROM trade_events
         WHERE is_active = 1
-        ORDER BY 
-            trade_date,
-            CASE WHEN type1 = 'intraday' AND trade_type = 'BUY' THEN 0 
-                 WHEN type1 = 'intraday' AND trade_type = 'SELL' THEN 1
-                 ELSE 2 END,
-            COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ORDER BY trade_date, COALESCE(trade_ts, trade_date || ' 09:15:00'), id
         ''')
     else:
         placeholders = ','.join('?' * len(active_ids))
@@ -85,12 +81,7 @@ def fetch_active_trades() -> list[TradeTuple]:
                brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm
         FROM trade_events
         WHERE is_active = 1 AND profile_id IN ({placeholders})
-        ORDER BY 
-            trade_date,
-            CASE WHEN type1 = 'intraday' AND trade_type = 'BUY' THEN 0 
-                 WHEN type1 = 'intraday' AND trade_type = 'SELL' THEN 1
-                 ELSE 2 END,
-            COALESCE(trade_ts, trade_date || ' 09:15:00'), id
+        ORDER BY trade_date, COALESCE(trade_ts, trade_date || ' 09:15:00'), id
         ''', tuple(active_ids))
     trades = cursor.fetchall()
     conn.close()
@@ -220,101 +211,106 @@ def fetch_active_trades() -> list[TradeTuple]:
 
 def match_fifo(trades: list[TradeTuple], collect_matches: bool = True) -> list[MatchRecord] | None:
     """
-    Matches SELLs to BUYs per contract identity. FIFO is applied independently per contract.
-    If collect_matches is True, returns a list of match records (sell_id, buy_id, matched_quantity, equity).
-    Raises FifoMatchError if oversell is detected for any contract.
-    """
-    buy_queues: dict[ContractKey, list[BuyQueueItem]] = {}  # Per-contract buy queues
-    contract_holdings: dict[ContractKey, int] = {}  # Track total holdings per contract
-    matches: list[MatchRecord] = []
-    
-    current_date = None
-    
-    for trade in trades:
-        trade_date = trade[1]
-        
-        # Check for date change (previously used for Intraday square-off validation)
-        if current_date and trade_date != current_date:
-            current_date = trade_date
-        elif not current_date:
-            current_date = trade_date
-            
-        (trade_id, trade_date, equity, trade_type, type1, type2, strike, expiry,
-         quantity, _price, _brokerage, _notes, _is_active, _brokerage_auto, _brokerage_override, _mtf_amount, _mtf_rate_ppm) = trade
-        
-        # Validate equity field
-        if not equity or equity.strip() == '':
-            raise FifoMatchError(
-                f"Invalid trade: Trade ID {trade_id} has empty or missing equity field. "
-                f"Every trade must specify a stock symbol (e.g., 'TCS', 'RELIANCE')."
-            )
-        
-        contract_key: ContractKey = (equity, type1, type2, strike, expiry)
-        contract_label = f"{equity} | {type1}"
-        if type1 == 'options':
-            contract_label = f"{equity} | options | {type2} | {strike} | {expiry}"
-        elif type1 == 'futures':
-            contract_label = f"{equity} | futures | {expiry}"
+    Matches CLOSING trades to OPENING trades per contract using FIFO.
 
-        # Initialize buy queue and holdings for this contract if not exists
-        if contract_key not in buy_queues:
-            buy_queues[contract_key] = []
-            contract_holdings[contract_key] = 0
-        
-        if trade_type == 'BUY':
-            buy_queues[contract_key].append(BuyQueueItem(
-                id=trade_id,
-                remaining_quantity=quantity
+    Version 2.0: Uses the Position State Engine to classify trades as
+    OPENING or CLOSING before matching.  The matcher itself is a generic
+    quantity matching engine — it contains no product-specific knowledge.
+
+    For backward compatibility, MatchRecord still uses sell_id/buy_id:
+    - sell_id = the SELL trade (regardless of whether it opened or closed)
+    - buy_id = the BUY trade (regardless of whether it opened or closed)
+    This keeps the downstream PnL formula (sell_value - buy_cost) valid
+    for both LONG and SHORT positions.
+
+    Raises FifoMatchError if matching fails.
+    """
+    # Lazy import to avoid circular dependency
+    # (position_state_engine imports TradeTuple/ContractKey from this module)
+    from core.position_state_engine import process_trades, PositionStateError
+
+    # Phase 1: Classify trades via Position State Engine
+    try:
+        events = process_trades(trades)
+    except PositionStateError as exc:
+        raise FifoMatchError(str(exc)) from exc
+
+    # Phase 2: Generic FIFO quantity matching
+    opening_queues: dict[ContractKey, list[OpeningQueueItem]] = {}
+    matches: list[MatchRecord] = []
+
+    for event in events:
+        contract_key = event.contract_key
+
+        if contract_key not in opening_queues:
+            opening_queues[contract_key] = []
+
+        if event.event_role is EventRole.OPENING:
+            opening_queues[contract_key].append(OpeningQueueItem(
+                id=event.trade_id,
+                remaining_quantity=event.quantity,
             ))
-            contract_holdings[contract_key] += quantity
-        elif trade_type == 'SELL':
-            sell_qty: int = quantity
-            buy_queue = buy_queues[contract_key]
-            available_qty = contract_holdings[contract_key]
-            
-            while sell_qty > 0:
-                if not buy_queue:
-                    # Calculate oversell amount
-                    oversell_amount = sell_qty
-                    
+        elif event.event_role is EventRole.CLOSING:
+            closing_qty: int = event.quantity
+            opening_queue = opening_queues[contract_key]
+
+            while closing_qty > 0:
+                if not opening_queue:
+                    # Build contract label for error message
+                    if event.type1 == 'options':
+                        contract_label = f"{event.equity} | options | {event.type2} | {event.strike} | {event.expiry}"
+                    elif event.type1 == 'futures':
+                        contract_label = f"{event.equity} | futures | {event.expiry}"
+                    else:
+                        contract_label = f"{event.equity} | {event.type1}"
+
                     raise FifoMatchError(
                         f"\n{'='*60}\n"
                         f"OVERSELL DETECTED for {contract_label}\n"
                         f"{'='*60}\n"
-                        f"Trade ID: {trade_id}\n"
-                        f"Date: {trade_date}\n"
-                        f"Attempted SELL: {quantity} shares\n"
-                        f"Available holdings: {available_qty} shares\n"
-                        f"Oversell amount: {oversell_amount} shares\n"
+                        f"Trade ID: {event.trade_id}\n"
+                        f"Date: {event.trade_date}\n"
+                        f"Direction: {event.original_direction.value}\n"
+                        f"Attempted close: {event.quantity} shares\n"
+                        f"Unmatched: {closing_qty} shares\n"
                         f"\n"
                         f"💡 Suggestions:\n"
-                        f"  1. Check if you have BUY trades for this contract before this date\n"
-                        f"  2. Verify the SELL quantity is correct (should be ≤ {available_qty})\n"
+                        f"  1. Check if you have opening trades for this contract before this date\n"
+                        f"  2. Verify the quantity is correct\n"
                         f"  3. Ensure trades are in chronological order\n"
                         f"  4. Check if equity symbol is spelled correctly\n"
                         f"{'='*60}"
                     )
-                
-                oldest_buy: BuyQueueItem = buy_queue[0]
-                match_qty: int = min(sell_qty, oldest_buy['remaining_quantity'])
-                
+
+                oldest_opening: OpeningQueueItem = opening_queue[0]
+                match_qty: int = min(closing_qty, oldest_opening['remaining_quantity'])
+
                 if collect_matches:
+                    # Map to MatchRecord: sell_id = SELL trade, buy_id = BUY trade
+                    if event.original_direction is TradeDirection.SELL:
+                        # Closing trade is SELL → opening trade was BUY (LONG)
+                        sell_id = event.trade_id
+                        buy_id = oldest_opening['id']
+                    else:
+                        # Closing trade is BUY → opening trade was SELL (SHORT)
+                        sell_id = oldest_opening['id']
+                        buy_id = event.trade_id
+
                     matches.append(MatchRecord(
-                        sell_id=trade_id,
-                        buy_id=oldest_buy['id'],
+                        sell_id=sell_id,
+                        buy_id=buy_id,
                         matched_quantity=match_qty,
-                        equity=equity
+                        equity=event.equity,
                     ))
-                
-                oldest_buy['remaining_quantity'] -= match_qty
-                sell_qty -= match_qty
-                contract_holdings[contract_key] -= match_qty
-                
-                if oldest_buy['remaining_quantity'] == 0:
-                    buy_queue.pop(0)
-    
-    # Intraday trades can remain open if they are pending square-off.
-    # No strict error is raised here to allow users to add closing trades later.
+
+                oldest_opening['remaining_quantity'] -= match_qty
+                closing_qty -= match_qty
+
+                if oldest_opening['remaining_quantity'] == 0:
+                    opening_queue.pop(0)
+
+    # Open positions (pending square-off or ongoing) are allowed.
+    # No error is raised for remaining items in opening queues.
 
     if collect_matches:
         return matches

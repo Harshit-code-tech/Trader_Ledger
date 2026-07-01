@@ -3,8 +3,12 @@
 from datetime import datetime
 from typing import Optional, Tuple
 
-TYPE1_VALUES = ("intraday", "delivery", "mtf", "futures", "options")
-TYPE2_VALUES = ("CE", "PE")
+from core.trading_rules import (
+    get_all_product_types,
+    get_contract_field_requirement,
+    get_allowed_type2_values,
+    ContractFieldRequirement,
+)
 
 
 def _normalize_date(date_str: str) -> str:
@@ -65,8 +69,9 @@ def normalize_trade_classification(
             raise ValueError("Type1 is required when Type2/Strike/Expiry is provided.")
         return None, None, None, None
 
-    if type1 not in TYPE1_VALUES:
-        raise ValueError(f"Type1 must be one of: {', '.join(TYPE1_VALUES)}")
+    valid_types = get_all_product_types()
+    if type1 not in valid_types:
+        raise ValueError(f"Type1 must be one of: {', '.join(valid_types)}")
 
     strike = None
     if strike_text:
@@ -81,28 +86,37 @@ def normalize_trade_classification(
     if expiry_text:
         expiry = _normalize_date(expiry_text)
 
-    if type1 == "options":
+    # Validate fields based on ProductRule
+    field_req = get_contract_field_requirement(type1)
+
+    if field_req is ContractFieldRequirement.FULL:
+        # Options logic
+        allowed_type2 = sorted(get_allowed_type2_values(type1))
         if not type2:
-            raise ValueError("Type2 is required for options (CE/PE).")
-        if type2 not in TYPE2_VALUES:
-            raise ValueError("Type2 must be CE or PE for options.")
+            raise ValueError(f"Type2 is required for {type1} ({'/'.join(allowed_type2)}).")
+        if type2 not in allowed_type2:
+            raise ValueError(f"Type2 must be {' or '.join(allowed_type2)} for {type1}.")
         if strike is None:
-            raise ValueError("Strike is required for options.")
+            raise ValueError(f"Strike is required for {type1}.")
         if expiry is None:
-            raise ValueError("Expiry is required for options.")
-    elif type1 == "futures":
+            raise ValueError(f"Expiry is required for {type1}.")
+
+    elif field_req is ContractFieldRequirement.EXPIRY_ONLY:
+        # Futures logic
         if type2:
-            raise ValueError("Type2 must be empty for futures.")
+            raise ValueError(f"Type2 must be empty for {type1}.")
         if strike is not None:
-            raise ValueError("Strike must be empty for futures.")
+            raise ValueError(f"Strike must be empty for {type1}.")
         if expiry is None:
-            raise ValueError("Expiry is required for futures.")
-    else:
+            raise ValueError(f"Expiry is required for {type1}.")
+
+    elif field_req is ContractFieldRequirement.NONE:
+        # Intraday/Delivery/MTF logic
         if type2:
-            raise ValueError("Type2 must be empty for intraday/delivery/mtf.")
+            raise ValueError(f"Type2 must be empty for {type1}.")
         if strike is not None:
-            raise ValueError("Strike must be empty for intraday/delivery/mtf.")
+            raise ValueError(f"Strike must be empty for {type1}.")
         if expiry is not None:
-            raise ValueError("Expiry must be empty for intraday/delivery/mtf.")
+            raise ValueError(f"Expiry must be empty for {type1}.")
 
     return type1, (type2 if type2 else None), strike, expiry

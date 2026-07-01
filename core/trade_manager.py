@@ -13,6 +13,7 @@ from core.utils import make_trade_ts
 from core.trade_validation import normalize_trade_classification
 from core.brokerage import calculate_brokerage_auto
 from core.db_operations import get_connection
+import config
 
 logger = get_logger('core.trade_manager')
 
@@ -105,15 +106,59 @@ def validate_trade_data(data: Dict[str, Any]) -> Tuple[bool, str]:
         if int(mtf_amount * 100) > trade_amount:
             return False, "MTF amount cannot exceed buy trade amount"
 
-    # SELL reference validation
-    if data.get('trade_type') == 'SELL':
-        selected_reference = data.get('selected_sell_reference')
-        if not data.get('sell_reference_meta'):
-            return False, "No open BUY lots available for this contract. Add BUY first or adjust contract details."
-        if not selected_reference:
-            return False, "Select 'Sell Against' BUY lot for this SELL trade."
-        if quantity > selected_reference.get('remaining_qty', 0):
-            return False, f"SELL quantity ({quantity}) exceeds selected BUY lot remaining quantity ({selected_reference.get('remaining_qty', 0)})."
+    # Dynamic Position State Engine Validation
+    from core.position_state_engine import process_trades, PositionStateError
+    from core.fifo_matcher import fetch_active_trades, TradeTuple
+    from core.utils import make_trade_ts
+    
+    # 1. Fetch existing trades
+    active_profile_id = config.ACTIVE_PROFILE_IDS[0] if config.ACTIVE_PROFILE_IDS else 0
+    try:
+        existing_trades = fetch_active_trades(profile_id=active_profile_id)
+    except Exception:
+        existing_trades = []
+        
+    # 2. Build mock tuple for the proposed trade
+    try:
+        mock_id = 999999999
+        date_str = data['date_str'].strip()
+        day, month, year = date_str.split('-')
+        trade_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        price_paise = int(float(data['price']) * 100)
+        
+        proposed = TradeTuple(
+            id=mock_id,
+            trade_date=trade_date,
+            equity=data['equity'].strip().upper(),
+            trade_type=data['trade_type'],
+            quantity=int(data['quantity']),
+            price=price_paise,
+            brokerage=0,
+            brokerage_auto=0,
+            brokerage_override=None,
+            mtf_amount=0,
+            mtf_rate_ppm=0,
+            trade_ts=make_trade_ts(trade_date),
+            notes="",
+            type1=type1,
+            type2=type2,
+            strike=strike_val,
+            expiry=expiry,
+            is_active=1,
+            profile_id=active_profile_id
+        )
+        
+        all_trades = existing_trades + [proposed]
+        # Sort exactly as the FIFO matcher does: by date then ID
+        all_trades.sort(key=lambda t: (t.trade_date, t.id))
+        
+        # 3. Validate mathematically
+        process_trades(all_trades)
+        
+    except PositionStateError as e:
+        return False, str(e)
+    except Exception as e:
+        pass # If we fail to build the mock, let the save function handle validation errors
 
     return True, ""
 
@@ -161,11 +206,11 @@ def save_trade(data: Dict[str, Any], profile_id: int) -> int:
             mtf_rate_ppm = 96500
         
     notes = data.get('notes', '').strip()
-    if trade_type == 'SELL':
-        selected_reference = data.get('selected_sell_reference')
-        if selected_reference:
-            ref_note = f"[SELL_REF buy_id={selected_reference['buy_id']} remaining_at_entry={selected_reference['remaining_qty']}]"
-            notes = f"{notes}\n{ref_note}" if notes else ref_note
+    selected_reference = data.get('selected_close_reference')
+    if selected_reference:
+        ref_id = selected_reference.get('id')
+        ref_note = f"[CLOSE_REF id={ref_id} remaining_at_entry={selected_reference.get('remaining_qty')}]"
+        notes = f"{notes}\n{ref_note}" if notes else ref_note
             
     trade_ts = make_trade_ts(trade_date)
     

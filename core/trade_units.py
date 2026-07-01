@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Iterable, Mapping, TypedDict
 
 from core.fifo_matcher import TradeTuple
+from core.position_state_engine import process_trades, EventRole, PositionSide
 
 
 class TradeUnit(TypedDict):
@@ -58,11 +59,14 @@ class UnitAccumulator:
     sell_brokerage: int = 0
     matched_buy_cost: int = 0
     matched_buy_brokerage: int = 0
+    matched_sell_value: int = 0
+    matched_sell_brokerage: int = 0
     realized_pnl: int = 0
     mtf_interest: int = 0
     net_pnl: int = 0
-    first_buy_date: str | None = None
-    last_sell_date: str | None = None
+    first_opening_date: str | None = None
+    last_closing_date: str | None = None
+    position_side: str | None = None
     buy_trade_ids: list[int] | None = None
     sell_trade_ids: list[int] | None = None
 
@@ -177,54 +181,73 @@ def _build_lifecycle_units(
     trades: list[TradeTuple],
     match_results: list[Mapping[str, Any]]
 ) -> list[TradeUnit]:
-    pnl_by_sell: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
+    events = process_trades(trades)
+    # A single trade_id can produce multiple events (e.g. position flips).
+    # Build a lookup that maps trade_id to a list of events.
+    events_by_id: defaultdict[int, list] = defaultdict(list)
+    for e in events:
+        events_by_id[e.trade_id].append(e)
+    
+    pnl_by_closing: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
     for pnl in match_results:
-        pnl_by_sell[int(pnl['sell_id'])].append(pnl)
+        sell_id = int(pnl['sell_id'])
+        buy_id = int(pnl['buy_id'])
+        # Check if the sell_id has a CLOSING event
+        sell_events = events_by_id.get(sell_id, [])
+        is_sell_closing = any(e.event_role is EventRole.CLOSING for e in sell_events)
+        if is_sell_closing:
+            pnl_by_closing[sell_id].append(pnl)
+        else:
+            pnl_by_closing[buy_id].append(pnl)
 
-    trades_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list[TradeTuple]] = defaultdict(list)
-    for trade in trades:
-        trades_by_contract[_contract_key(trade)].append(trade)
+    events_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list] = defaultdict(list)
+    for event in events:
+        events_by_contract[event.contract_key].append(event)
 
     units: list[TradeUnit] = []
     unit_index = 1
 
-    for contract_key, contract_trades in trades_by_contract.items():
-        contract_trades.sort(key=lambda t: (t[1], t[0]))
+    for contract_key, contract_events in events_by_contract.items():
         current: UnitAccumulator | None = None
 
-        for trade in contract_trades:
-            trade_id = trade[0]
-            trade_date = trade[1]
-            trade_type = trade[3]
-            quantity = trade[8]
-            price = trade[9]
-            brokerage = trade[10]
+        for event in contract_events:
+            trade_id = event.trade_id
+            trade_date = event.trade_date
+            trade_type = event.original_direction.value
+            quantity = event.quantity
+            price = event.price
+            brokerage = event.brokerage
 
             if current is None:
                 current = _start_unit(contract_key)
+                current.position_side = event.position_side.value
 
             if trade_type == "BUY":
                 current.total_buy_qty += quantity
                 current.buy_cost_ex_brokerage += quantity * price
                 current.buy_brokerage += brokerage
                 current.buy_trade_ids.append(trade_id)
-                if current.first_buy_date is None:
-                    current.first_buy_date = trade_date
             elif trade_type == "SELL":
                 current.total_sell_qty += quantity
                 current.sell_value_ex_brokerage += quantity * price
                 current.sell_brokerage += brokerage
                 current.sell_trade_ids.append(trade_id)
-                current.last_sell_date = trade_date
-                for pnl in pnl_by_sell.get(trade_id, []):
+                
+            if event.event_role is EventRole.OPENING:
+                if current.first_opening_date is None:
+                    current.first_opening_date = trade_date
+            elif event.event_role is EventRole.CLOSING:
+                current.last_closing_date = trade_date
+                for pnl in pnl_by_closing.get(trade_id, []):
                     current.realized_pnl += int(pnl['realized_pnl'])
                     current.mtf_interest += int(pnl.get('mtf_interest', 0))
                     current.net_pnl += int(pnl.get('net_pnl', pnl['realized_pnl']))
                     current.matched_buy_cost += int(pnl['buy_cost'])
-                    current.matched_buy_brokerage += int(pnl['buy_brokerage_alloc'])
+                    current.matched_buy_brokerage += int(pnl.get('buy_brokerage_alloc', 0))
+                    current.matched_sell_value += int(pnl.get('sell_value', 0))
+                    current.matched_sell_brokerage += int(pnl.get('sell_brokerage_alloc', 0))
 
-            net_qty = current.total_buy_qty - current.total_sell_qty
-            if net_qty == 0 and current.total_sell_qty > 0:
+            if current.total_buy_qty == current.total_sell_qty and current.total_sell_qty > 0:
                 units.append(_finalize_unit(current, status="Closed", unit_index=unit_index))
                 unit_index += 1
                 current = None
@@ -240,48 +263,72 @@ def _build_sell_units(
     trades: list[TradeTuple],
     match_results: list[Mapping[str, Any]]
 ) -> list[TradeUnit]:
+    # Despite the name (for UI backward compatibility), this groups by CLOSING trade.
+    events = process_trades(trades)
+    # A single trade_id can produce multiple events (e.g. position flips).
+    events_by_id: defaultdict[int, list] = defaultdict(list)
+    for e in events:
+        events_by_id[e.trade_id].append(e)
+    
     trades_by_id = {trade[0]: trade for trade in trades}
-    pnl_by_sell: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
+    pnl_by_closing: defaultdict[int, list[Mapping[str, Any]]] = defaultdict(list)
     for pnl in match_results:
-        pnl_by_sell[int(pnl['sell_id'])].append(pnl)
+        sell_id = int(pnl['sell_id'])
+        buy_id = int(pnl['buy_id'])
+        sell_events = events_by_id.get(sell_id, [])
+        is_sell_closing = any(e.event_role is EventRole.CLOSING for e in sell_events)
+        if is_sell_closing:
+            pnl_by_closing[sell_id].append(pnl)
+        else:
+            pnl_by_closing[buy_id].append(pnl)
 
-    sell_keys = []
-    for sell_id in pnl_by_sell:
-        if sell_id in trades_by_id:
-            sell_trade = trades_by_id[sell_id]
-            sell_keys.append((sell_trade[1], sell_id))
-    sell_keys.sort()
+    closing_keys = []
+    for closing_id in pnl_by_closing:
+        if closing_id in trades_by_id:
+            closing_trade = trades_by_id[closing_id]
+            closing_keys.append((closing_trade[1], closing_id))
+    closing_keys.sort()
 
     units: list[TradeUnit] = []
     unit_index = 1
 
-    for _sell_date, sell_id in sell_keys:
-        sell_trade = trades_by_id[sell_id]
-        contract_key = _contract_key(sell_trade)
+    for _closing_date, closing_id in closing_keys:
+        closing_trade = trades_by_id[closing_id]
+        # Find the CLOSING event for this trade_id (flip trades have both CLOSING and OPENING)
+        closing_event_list = events_by_id.get(closing_id, [])
+        closing_event = next((e for e in closing_event_list if e.event_role is EventRole.CLOSING), closing_event_list[0] if closing_event_list else None)
+        contract_key = _contract_key(closing_trade)
         equity, type1, type2, strike, expiry = contract_key
 
-        sell_matches = pnl_by_sell[sell_id]
-        total_buy_qty = sum(int(p['matched_quantity']) for p in sell_matches)
-        total_sell_qty = total_buy_qty
-        buy_cost = sum(int(p['buy_cost']) for p in sell_matches)
-        sell_value = sum(int(p['sell_value']) for p in sell_matches)
-        buy_brokerage = sum(int(p['buy_brokerage_alloc']) for p in sell_matches)
-        sell_brokerage = sum(int(p['sell_brokerage_alloc']) for p in sell_matches)
-        realized_pnl = sum(int(p['realized_pnl']) for p in sell_matches)
+        matches = pnl_by_closing[closing_id]
+        total_matched_qty = sum(int(p['matched_quantity']) for p in matches)
+        total_buy_qty = total_matched_qty
+        total_sell_qty = total_matched_qty
+        
+        buy_cost = sum(int(p['buy_cost']) for p in matches)
+        sell_value = sum(int(p.get('sell_value', 0)) for p in matches)
+        buy_brokerage = sum(int(p.get('buy_brokerage_alloc', 0)) for p in matches)
+        sell_brokerage = sum(int(p.get('sell_brokerage_alloc', 0)) for p in matches)
+        realized_pnl = sum(int(p['realized_pnl']) for p in matches)
 
         avg_buy_price = float(buy_cost / total_buy_qty) if total_buy_qty else 0
         avg_sell_price = float(sell_value / total_sell_qty) if total_sell_qty else 0
 
-        buy_trade_ids = sorted({int(p['buy_id']) for p in sell_matches})
-        sell_trade_ids = [sell_id]
+        buy_trade_ids = sorted({int(p['buy_id']) for p in matches})
+        sell_trade_ids = sorted({int(p['sell_id']) for p in matches})
 
-        buy_dates = [trades_by_id[bid][1] for bid in buy_trade_ids if bid in trades_by_id]
+        if closing_event.position_side is PositionSide.LONG:
+            opening_ids = buy_trade_ids
+        else:
+            opening_ids = sell_trade_ids
+
+        opening_dates = [trades_by_id[tid][1] for tid in opening_ids if tid in trades_by_id]
         holding_days = 0
-        if buy_dates:
-            holding_days = (_parse_date(sell_trade[1]) - _parse_date(min(buy_dates))).days
+        if opening_dates:
+            holding_days = (_parse_date(closing_trade[1]) - _parse_date(min(opening_dates))).days
 
-        start_date = min(buy_dates) if buy_dates else None
-        end_date = sell_trade[1]
+        start_date = min(opening_dates) if opening_dates else None
+        end_date = closing_trade[1]
 
         units.append(TradeUnit(
             contract_key=contract_key,
@@ -301,8 +348,8 @@ def _build_sell_units(
             total_buy_cost=buy_cost + buy_brokerage,
             total_sell_value=sell_value - sell_brokerage,
             realized_pnl=realized_pnl,
-            mtf_interest=sum(int(p.get('mtf_interest', 0)) for p in sell_matches),
-            net_pnl=sum(int(p.get('net_pnl', p['realized_pnl'])) for p in sell_matches),
+            mtf_interest=sum(int(p.get('mtf_interest', 0)) for p in matches),
+            net_pnl=sum(int(p.get('net_pnl', p['realized_pnl'])) for p in matches),
             remaining_investment=0,
             holding_days=holding_days,
             status="Closed",
@@ -312,36 +359,67 @@ def _build_sell_units(
         ))
         unit_index += 1
 
-    matched_qty_per_buy: defaultdict[int, int] = defaultdict(int)
+    # Open quantities
+    matched_qty_per_opening: defaultdict[int, int] = defaultdict(int)
     for pnl in match_results:
-        matched_qty_per_buy[int(pnl['buy_id'])] += int(pnl['matched_quantity'])
+        sell_id = int(pnl['sell_id'])
+        buy_id = int(pnl['buy_id'])
+        sell_events = events_by_id.get(sell_id, [])
+        is_sell_opening = any(e.event_role is EventRole.OPENING for e in sell_events)
+        if is_sell_opening:
+            matched_qty_per_opening[sell_id] += int(pnl['matched_quantity'])
+        else:
+            matched_qty_per_opening[buy_id] += int(pnl['matched_quantity'])
 
-    open_agg: dict[tuple[str, str, str | None, float | None, str | None], UnitAccumulator] = {}
-    for trade in trades:
-        trade_id = trade[0]
-        trade_type = trade[3]
-        if trade_type != "BUY":
+    # Detect flip trades: trade_ids that have both CLOSING and OPENING events.
+    # For these, matched_qty_per_opening over-counts because it includes
+    # matches from the CLOSING phase. Subtract the closing event quantity.
+    flip_closing_qty: dict[int, int] = {}
+    flip_opening_ids: set[int] = set()
+    for event in events:
+        if event.event_role is EventRole.CLOSING:
+            flip_closing_qty[event.trade_id] = flip_closing_qty.get(event.trade_id, 0) + event.quantity
+        if event.event_role is EventRole.OPENING:
+            flip_opening_ids.add(event.trade_id)
+
+    open_agg: dict[tuple, UnitAccumulator] = {}
+    for event in events:
+        if event.event_role is not EventRole.OPENING:
             continue
-        quantity = trade[8]
-        price = trade[9]
-        brokerage = trade[10]
+            
+        trade_id = event.trade_id
+        quantity = event.quantity
+        price = event.price
+        brokerage = event.brokerage
 
-        matched_qty = matched_qty_per_buy.get(trade_id, 0)
-        remaining_qty = quantity - matched_qty
+        total_matched = matched_qty_per_opening.get(trade_id, 0)
+        # For flip trades, subtract the closing-phase matches
+        if trade_id in flip_closing_qty and trade_id in flip_opening_ids:
+            total_matched = max(0, total_matched - flip_closing_qty[trade_id])
+        remaining_qty = quantity - total_matched
         if remaining_qty <= 0:
             continue
 
-        contract_key = _contract_key(trade)
+        contract_key = event.contract_key
         if contract_key not in open_agg:
-            open_agg[contract_key] = _start_unit(contract_key)
+            unit = _start_unit(contract_key)
+            unit.position_side = event.position_side.value
+            open_agg[contract_key] = unit
 
         unit = open_agg[contract_key]
-        unit.total_buy_qty += remaining_qty
-        unit.buy_cost_ex_brokerage += remaining_qty * price
-        unit.buy_brokerage += (brokerage * remaining_qty) // quantity
-        unit.buy_trade_ids.append(trade_id)
-        if unit.first_buy_date is None:
-            unit.first_buy_date = trade[1]
+        if event.original_direction.value == "BUY":
+            unit.total_buy_qty += remaining_qty
+            unit.buy_cost_ex_brokerage += remaining_qty * price
+            unit.buy_brokerage += (brokerage * remaining_qty) // quantity
+            unit.buy_trade_ids.append(trade_id)
+        else:
+            unit.total_sell_qty += remaining_qty
+            unit.sell_value_ex_brokerage += remaining_qty * price
+            unit.sell_brokerage += (brokerage * remaining_qty) // quantity
+            unit.sell_trade_ids.append(trade_id)
+            
+        if unit.first_opening_date is None:
+            unit.first_opening_date = event.trade_date
 
     for unit in open_agg.values():
         units.append(_finalize_unit(unit, status="Open", unit_index=unit_index))
@@ -360,26 +438,32 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
     total_sell_value = unit.sell_value_ex_brokerage - unit.sell_brokerage
 
     holding_days = 0
-    if unit.first_buy_date and unit.last_sell_date:
-        holding_days = (_parse_date(unit.last_sell_date) - _parse_date(unit.first_buy_date)).days
-    elif unit.first_buy_date and status == "Open":
-        holding_days = (datetime.today().date() - _parse_date(unit.first_buy_date).date()).days
+    if unit.first_opening_date and unit.last_closing_date:
+        holding_days = (_parse_date(unit.last_closing_date) - _parse_date(unit.first_opening_date)).days
+    elif unit.first_opening_date and status == "Open":
+        holding_days = (datetime.today().date() - _parse_date(unit.first_opening_date).date()).days
 
-    remaining_qty = max(unit.total_buy_qty - unit.total_sell_qty, 0)
+    remaining_qty = abs(unit.total_buy_qty - unit.total_sell_qty)
     remaining_investment = 0
+    
     if remaining_qty > 0:
-        if unit.matched_buy_cost or unit.matched_buy_brokerage:
-            # FIFO-based remaining cost (includes proportional brokerage).
-            remaining_investment = total_buy_cost - unit.matched_buy_cost - unit.matched_buy_brokerage
-        elif total_buy_qty > 0:
-            remaining_investment = (total_buy_cost * remaining_qty) // total_buy_qty
+        if unit.position_side == "LONG":
+            if unit.matched_buy_cost or unit.matched_buy_brokerage:
+                remaining_investment = total_buy_cost - unit.matched_buy_cost - unit.matched_buy_brokerage
+            elif total_buy_qty > 0:
+                remaining_investment = (total_buy_cost * remaining_qty) // total_buy_qty
+        elif unit.position_side == "SHORT":
+            if unit.matched_sell_value or unit.matched_sell_brokerage:
+                remaining_investment = total_sell_value - unit.matched_sell_value + unit.matched_sell_brokerage
+            elif total_sell_qty > 0:
+                remaining_investment = (total_sell_value * remaining_qty) // total_sell_qty
 
     return TradeUnit(
         contract_key=unit.contract_key,
-        trade_label=format_trade_label(unit.equity, unit.first_buy_date, unit.last_sell_date, unit_index),
+        trade_label=format_trade_label(unit.equity, unit.first_opening_date, unit.last_closing_date, unit_index),
         contract_display=format_contract_display(unit.equity, unit.type1, unit.type2, unit.strike, unit.expiry),
-        start_date=unit.first_buy_date,
-        end_date=unit.last_sell_date,
+        start_date=unit.first_opening_date,
+        end_date=unit.last_closing_date,
         equity=unit.equity,
         type1=unit.type1,
         type2=unit.type2,

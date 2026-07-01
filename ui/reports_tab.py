@@ -34,7 +34,7 @@ from core.pnl_aggregator import (
     aggregate_pnl_by_week,
     aggregate_pnl_by_month,
     aggregate_pnl_by_year,
-    aggregate_pnl_by_sell,
+    aggregate_pnl_by_closing_trade,
     aggregate_pnl_by_equity,
     aggregate_trade_value_by_date,
     filter_matches_by_date_range
@@ -718,8 +718,11 @@ class ReportsTab:
         """Create analytics section for win/loss ratio and holding period."""
         analytics_frame = ttk.LabelFrame(parent, text="📈 Analytics", style="Report.TLabelframe")
         analytics_frame.pack(fill='x', pady=(0, 20))
+        
+        help_btn = ttk.Button(analytics_frame, text="ℹ️ What do these mean?", command=self.show_analytics_help)
+        help_btn.grid(row=0, column=3, rowspan=2, padx=20, sticky='e')
 
-        for col in range(3):
+        for col in range(4):
             analytics_frame.columnconfigure(col, weight=1)
 
         def add_metric(row: int, col: int, label: str) -> ttk.Label:
@@ -749,6 +752,77 @@ class ReportsTab:
 
         self.day_trade_value_label = add_metric(6, 0, "Avg Day Trade Value (₹)")
         self.total_trade_value_label = add_metric(6, 1, "Total Trade Value (₹)")
+
+    def show_analytics_help(self) -> None:
+        """Show a styled custom dialog explaining analytics metrics."""
+        help_window = tk.Toplevel(self.parent)
+        help_window.title("Analytics Explained")
+        help_window.geometry("600x600")
+        help_window.transient(self.parent)
+        help_window.grab_set()
+        
+        # Center the window
+        help_window.update_idletasks()
+        x = self.parent.winfo_rootx() + (self.parent.winfo_width() // 2) - 300
+        y = self.parent.winfo_rooty() + (self.parent.winfo_height() // 2) - 300
+        help_window.geometry(f"+{x}+{y}")
+        
+        main_frame = ttk.Frame(help_window, padding="25")
+        main_frame.pack(fill='both', expand=True)
+        
+        ttk.Label(
+            main_frame,
+            text="📈 ANALYTICS METRICS EXPLAINED",
+            font=('Consolas', 14, 'bold')
+        ).pack(anchor='w', pady=(0, 20))
+        
+        # Using a text widget allows for rich text formatting (bolding titles)
+        # while keeping the background consistent with the UI
+        style = ttk.Style()
+        bg_color = style.lookup('TFrame', 'background') or '#f0f0f0'
+        
+        text_widget = tk.Text(
+            main_frame,
+            wrap='word',
+            font=('Segoe UI', 10),
+            bg=bg_color,
+            relief='flat',
+            state='normal',
+            borderwidth=0
+        )
+        text_widget.pack(fill='both', expand=True, pady=(0, 15))
+        
+        # Configure text styles
+        text_widget.tag_configure('bullet', font=('Segoe UI', 12, 'bold'), foreground='#34495e')
+        text_widget.tag_configure('title', font=('Segoe UI', 10, 'bold'), foreground='#2c3e50')
+        text_widget.tag_configure('desc', font=('Segoe UI', 10))
+        text_widget.tag_configure('note', font=('Segoe UI', 9, 'italic'), foreground='#7f8c8d')
+        
+        metrics = [
+            ("Win/Loss Ratio", "The number of winning trades divided by the number of losing trades.\n", 
+             "Why 'inf'? Shows 'inf' (infinity) if you have winning trades but zero losing trades, as division by zero is mathematically infinite.\n"),
+            ("Win Rate %", "The percentage of all trades that ended in profit.\n", None),
+            ("Profit Factor", "Your total gross profit divided by your total gross loss. A value above 1.0 means you are profitable overall.\n",
+             "Why 'inf'? Shows 'inf' (infinity) if you made a profit but have zero total losses.\n"),
+            ("Avg Win / Avg Loss", "The average amount made on a winning trade vs. the average amount lost on a losing trade.\n", None),
+            ("Expectancy", "The average amount you can expect to win or lose per trade over the long term, based on your win rate and average win/loss sizes.\n", None),
+            ("Holding Period", "The average and median number of days a position was held before being sold.\n", None),
+            ("Max Drawdown", "The largest single drop in your total profit from its peak. Shows your worst continuous loss.\n", None),
+            ("Trade Value", "The average value you trade per day and your total traded value overall.\n", None)
+        ]
+        
+        for title, desc, note in metrics:
+            text_widget.insert('end', "• ", 'bullet')
+            text_widget.insert('end', f"{title}: ", 'title')
+            text_widget.insert('end', f"{desc}", 'desc')
+            if note:
+                text_widget.insert('end', f"   {note}", 'note')
+            text_widget.insert('end', "\n")
+            
+        text_widget.config(state='disabled')
+        
+        close_btn = ttk.Button(main_frame, text="Got it!", command=help_window.destroy, width=20)
+        close_btn.pack(pady=10)
 
     def calculate_reports(self) -> None:
         """
@@ -1006,7 +1080,7 @@ class ReportsTab:
             self.total_loss = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] < 0)
             self.net_pnl = self.total_profit + self.total_loss
 
-            sell_totals = aggregate_pnl_by_sell(filtered_pnl_results, pnl_field="net_pnl")
+            sell_totals = aggregate_pnl_by_closing_trade(filtered_pnl_results, trades_by_id, pnl_field="net_pnl")
             from core.analytics_engine import calculate_advanced_metrics
             self.analytics = calculate_advanced_metrics(
                 filtered_pnl_results, trades_by_id, sell_totals, daily_pnl_totals

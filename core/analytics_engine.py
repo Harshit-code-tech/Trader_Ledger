@@ -71,7 +71,7 @@ def calculate_advanced_metrics(
     for match in filtered_pnl_results:
         buy_date = trades_by_id[match['buy_id']]['trade_date']
         sell_date = trades_by_id[match['sell_id']]['trade_date']
-        days = (datetime.strptime(sell_date, '%Y-%m-%d') - datetime.strptime(buy_date, '%Y-%m-%d')).days
+        days = abs((datetime.strptime(sell_date, '%Y-%m-%d') - datetime.strptime(buy_date, '%Y-%m-%d')).days)
         qty = match['matched_quantity']
         total_days += days * qty
         total_qty += qty

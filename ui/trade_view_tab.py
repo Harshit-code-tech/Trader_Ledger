@@ -26,6 +26,7 @@ class TradeViewTab:
         self.search_var = tk.StringVar(value="")
         self.sort_var = tk.StringVar(value="Date")
         self.show_raw_var = tk.BooleanVar(value=False)
+        self.show_open_only_var = tk.BooleanVar(value=False)
         self.total_trades_var = tk.StringVar(value="0")
         self.total_units_var = tk.StringVar(value="0")
         self.closed_trades_var = tk.StringVar(value="0")
@@ -86,7 +87,7 @@ class TradeViewTab:
         self.sort_entry = ttk.Combobox(
             controls,
             textvariable=self.sort_var,
-            values=["Date", "Profit/Loss", "Holding Days"],
+            values=["Date", "Profit/Loss", "Holding Days", "Status"],
             state='readonly',
             width=14
         )
@@ -102,6 +103,13 @@ class TradeViewTab:
             controls,
             text="Show raw trades",
             variable=self.show_raw_var,
+            command=self.refresh_units
+        ).pack(side='left', padx=(10, 0))
+
+        ttk.Checkbutton(
+            controls,
+            text="Open Only",
+            variable=self.show_open_only_var,
             command=self.refresh_units
         ).pack(side='left', padx=(10, 0))
 
@@ -210,6 +218,9 @@ class TradeViewTab:
                     or search_term in (u.get('equity') or '').lower()
                 )]
 
+            if self.show_open_only_var.get():
+                units = [u for u in units if u.get('status') == 'Open']
+
             units = self._sort_units(units)
             self._update_summary(units)
 
@@ -316,6 +327,8 @@ class TradeViewTab:
             return sorted(units, key=lambda u: u['realized_pnl'], reverse=True)
         if mode == "holding days":
             return sorted(units, key=lambda u: u['holding_days'], reverse=True)
+        if mode == "status":
+            return sorted(units, key=lambda u: (u['status'] != 'Open', u.get('end_date') or u.get('start_date') or ''))
 
         def sort_date(unit: Mapping[str, Any]) -> datetime:
             date_str = unit.get('end_date') or unit.get('start_date')

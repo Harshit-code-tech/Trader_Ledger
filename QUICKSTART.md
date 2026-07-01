@@ -1,4 +1,4 @@
-# Trader Ledger v1.4.6 - Quick Start Guide
+# Trader Ledger v1.5.0 - Quick Start Guide
 
 ## For First-Time Use
 
@@ -53,6 +53,8 @@ Just double-click **`run.bat`** to start the application.
 ### Trade View Tab
 - Group by lifecycle or sell transaction
 - See gross P/L, MTF interest, and net P/L
+- Filter to show **Open Only** positions
+- Sort by Date, Profit/Loss, Holding Days, or Status
 - Expand a trade unit to view audit details
 
 ### Onboarding
@@ -118,4 +120,4 @@ Check the log file: `logs/trader_ledger.log`
 
 ---
 
-**Version 1.4.6** - Ready for daily use
+**Version 1.5.0** - Ready for daily use

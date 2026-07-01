@@ -19,6 +19,9 @@ from typing import TypedDict
 from datetime import datetime, date
 from collections import defaultdict
 
+from core.position_state_engine import process_trades, EventRole, PositionSide
+from core.fifo_matcher import TradeTuple
+
 
 class OpenPositionError(Exception):
     pass
@@ -57,11 +60,12 @@ class OpenPosition(TypedDict):
     strike: float | None
     expiry: str | None
     status: str  # "OPEN" or "CLOSED"
+    position_side: str # "LONG" or "SHORT"
     remaining_qty: int
     avg_price: float  # In rupees (price/100)
     total_cost: int  # In paise
     unrealized_pnl: int  # In paise (will be 0 for now, needs market price)
-    holding_days: int  # Calendar days since first buy
+    holding_days: int  # Calendar days since first open
 
 
 def calculate_open_positions(
@@ -81,40 +85,68 @@ def calculate_open_positions(
     Returns:
         List of open positions with equity, status, qty, avg price, unrealized P/L
     """
-    # Track matched quantities per buy trade
-    matched_qty_per_buy: defaultdict[int, int] = defaultdict(int)
+    # Track matched quantities for both sides of the match
+    matched_qty_per_trade: defaultdict[int, int] = defaultdict(int)
     
     for match in matches:
-        buy_id = match['buy_id']
-        matched_qty_per_buy[buy_id] += match['matched_quantity']
+        matched_qty_per_trade[match['buy_id']] += match['matched_quantity']
+        matched_qty_per_trade[match['sell_id']] += match['matched_quantity']
     
-    # Calculate remaining quantities for all BUY trades
+    # 1. Convert TradeDicts to TradeTuples chronologically
+    trades_list = sorted(trades_by_id.values(), key=lambda t: (t['trade_date'], t['id']))
+    trade_tuples: list[TradeTuple] = []
+    for t in trades_list:
+        trade_tuples.append((
+            t['id'], t['trade_date'], t['equity'], t['trade_type'],
+            t.get('type1') or 'delivery', t.get('type2'), t.get('strike'), t.get('expiry'),
+            t['quantity'], t['price'], t['brokerage'], t.get('notes', ''),
+            t.get('is_active', 1), t.get('brokerage_auto', 0),
+            t.get('brokerage_override'), t.get('mtf_amount', 0), t.get('mtf_rate_ppm')
+        ))
+        
+    # 2. Run through Position State Engine
+    events = process_trades(trade_tuples)
+
+    # Detect flip trades: trade_ids that produce both CLOSING and OPENING events
+    # For these, the closing event's quantity must be excluded from the opening event's matched calc.
+    closing_qty_per_trade: dict[int, int] = {}
+    opening_event_exists: set[int] = set()
+    for event in events:
+        if event.event_role is EventRole.CLOSING:
+            closing_qty_per_trade[event.trade_id] = closing_qty_per_trade.get(event.trade_id, 0) + event.quantity
+        if event.event_role is EventRole.OPENING:
+            opening_event_exists.add(event.trade_id)
+    # A flip trade has both a CLOSING and an OPENING event for the same trade_id
+    flip_trade_closing_qty: dict[int, int] = {
+        tid: qty for tid, qty in closing_qty_per_trade.items()
+        if tid in opening_event_exists
+    }
+
+    # 3. Calculate remaining quantities for all OPENING trades
     open_positions_by_contract: defaultdict[tuple[str, str, str | None, float | None, str | None], list[dict]] = defaultdict(list)
     
-    for trade_id, trade in trades_by_id.items():
-        if trade['trade_type'] != 'BUY':
-            continue
-        
-        original_qty = trade['quantity']
-        matched_qty = matched_qty_per_buy.get(trade_id, 0)
-        remaining_qty = original_qty - matched_qty
-        
-        if remaining_qty > 0:
-            equity = trade['equity']
-            type1 = trade.get('type1') or "delivery"
-            type2 = trade.get('type2')
-            strike = trade.get('strike')
-            expiry = trade.get('expiry')
-            contract = (equity, type1, type2, strike, expiry)
-            open_positions_by_contract[contract].append({
-                'trade_id': trade_id,
-                'remaining_qty': remaining_qty,
-                'price': trade['price'],  # In paise
-                'brokerage': trade['brokerage'],
-                'trade_date': trade['trade_date']
-            })
+    for event in events:
+        if event.event_role is EventRole.OPENING:
+            total_matched = matched_qty_per_trade[event.trade_id]
+            # For flip trades, subtract only the opening-phase matches
+            # total_matched includes both closing-phase matches and opening-phase matches
+            # closing-phase matches = flip_trade_closing_qty[trade_id]
+            # opening-phase matches = total_matched - flip_trade_closing_qty[trade_id]
+            flip_close = flip_trade_closing_qty.get(event.trade_id, 0)
+            opening_matched = total_matched - flip_close
+            remaining_qty = event.quantity - opening_matched
+            
+            if remaining_qty > 0:
+                open_positions_by_contract[event.contract_key].append({
+                    'trade_id': event.trade_id,
+                    'remaining_qty': remaining_qty,
+                    'price': event.price,  # In paise
+                    'brokerage': event.brokerage,
+                    'trade_date': event.trade_date,
+                    'position_side': event.position_side
+                })
     
-    # Aggregate open positions per equity
+    # Aggregate open positions per contract
     results: list[OpenPosition] = []
     
     for contract, positions in open_positions_by_contract.items():
@@ -126,10 +158,12 @@ def calculate_open_positions(
             for p in positions
         )
 
-        first_buy_date = min(p['trade_date'] for p in positions)
-        holding_days = (date.today() - datetime.strptime(first_buy_date, "%Y-%m-%d").date()).days
+        first_date = min(p['trade_date'] for p in positions)
+        holding_days = (date.today() - datetime.strptime(first_date, "%Y-%m-%d").date()).days
         if holding_days < 0:
             holding_days = 0
+            
+        position_side = positions[0]['position_side']
         
         # Calculate average price (in rupees)
         avg_price_paise = total_cost / total_qty if total_qty > 0 else 0
@@ -140,8 +174,13 @@ def calculate_open_positions(
         if market_prices and equity in market_prices:
             market_price = market_prices[equity]  # In paise
             current_value = total_qty * market_price
-            cost_with_brokerage = total_cost + total_brokerage
-            unrealized_pnl = current_value - cost_with_brokerage
+            
+            if position_side is PositionSide.LONG:
+                cost_with_brokerage = total_cost + total_brokerage
+                unrealized_pnl = current_value - cost_with_brokerage
+            else:
+                # SHORT: total_cost is our credit from selling. Brokerage is a debit.
+                unrealized_pnl = total_cost - current_value - total_brokerage
         
         results.append(OpenPosition(
             equity=equity,
@@ -150,6 +189,7 @@ def calculate_open_positions(
             strike=strike,
             expiry=expiry,
             status="OPEN",
+            position_side=position_side.value,
             remaining_qty=total_qty,
             avg_price=round(avg_price_rupees, 2),
             total_cost=total_cost,

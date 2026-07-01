@@ -15,7 +15,7 @@
 
 ; Variables (like constants in programming)
 #define MyAppName "Trader Ledger"
-#define MyAppVersion "1.4.6"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "Baba's Trading App"
 #define MyAppExeName "TraderLedger.exe"
 
