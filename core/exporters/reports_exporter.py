@@ -6,14 +6,15 @@ from core.logger import get_logger
 
 logger = get_logger('core.exporters')
 
-def export_audit_csv(matches: list, trades_by_id: dict, trade_ts_map: dict, remainder_flags: dict) -> str:
+def export_audit_csv(matches: list, trades_by_id: dict, trade_ts_map: dict, remainder_flags: dict, profile_name: str | None = None) -> str:
     """Export match-level audit details to CSV. Returns the filepath."""
     if not matches:
         raise ValueError("No match-level data to export.")
 
-    config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    export_dir = config.EXPORTS_DIR / profile_name if profile_name else config.EXPORTS_DIR
+    export_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = config.EXPORTS_DIR / f"audit_{timestamp}.csv"
+    filepath = export_dir / f"audit_{timestamp}.csv"
 
     def rupees(paise: int, absolute: bool = False) -> str:
         value = abs(paise) if absolute else paise
@@ -87,11 +88,12 @@ def export_audit_csv(matches: list, trades_by_id: dict, trade_ts_map: dict, rema
     return str(filepath)
 
 
-def export_report_csv(data: dict) -> str:
+def export_report_csv(data: dict, profile_name: str | None = None) -> str:
     """Export current filtered report to CSV. Returns the filepath."""
-    config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    export_dir = config.EXPORTS_DIR / profile_name if profile_name else config.EXPORTS_DIR
+    export_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = config.EXPORTS_DIR / f"report_{timestamp}.csv"
+    filepath = export_dir / f"report_{timestamp}.csv"
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -145,7 +147,7 @@ def export_report_csv(data: dict) -> str:
     return str(filepath)
 
 
-def export_report_excel(data: dict) -> str:
+def export_report_excel(data: dict, profile_name: str | None = None) -> str:
     """Export current filtered report to Excel (xlsx). Returns the filepath."""
     try:
         from openpyxl import Workbook
@@ -153,9 +155,10 @@ def export_report_excel(data: dict) -> str:
     except ImportError:
         raise ImportError("openpyxl is required for Excel export.\n\nInstall it with:\npip install openpyxl")
 
-    config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    export_dir = config.EXPORTS_DIR / profile_name if profile_name else config.EXPORTS_DIR
+    export_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = config.EXPORTS_DIR / f"report_{timestamp}.xlsx"
+    filepath = export_dir / f"report_{timestamp}.xlsx"
 
     wb = Workbook()
     ws_summary = wb.active

@@ -8,6 +8,7 @@ Decouples trade persistence from the UI presentation.
 import sqlite3
 from datetime import date
 from typing import Optional, Tuple, List, Dict, Any
+from core.settings_manager import get_default_mtf_rate_pct
 from core.logger import get_logger
 from core.utils import make_trade_ts
 from core.trade_validation import normalize_trade_classification
@@ -197,13 +198,14 @@ def save_trade(data: Dict[str, Any], profile_id: int) -> int:
     mtf_amount_paise = 0
     mtf_rate_ppm = None
     if type1_norm == 'mtf' and trade_type == 'BUY':
+        default_rate = get_default_mtf_rate_pct()
         try:
             mtf_amount_paise = int(float(data.get('mtf_amount', 0) or 0) * 100)
-            mtf_rate_pct = float(data.get('mtf_rate_pct', 9.65) or 9.65)
+            mtf_rate_pct = float(data.get('mtf_rate_pct', default_rate) or default_rate)
             mtf_rate_ppm = int(mtf_rate_pct * 10000)
         except (ValueError, TypeError):
             mtf_amount_paise = 0
-            mtf_rate_ppm = 96500
+            mtf_rate_ppm = int(default_rate * 10000)
         
     notes = data.get('notes', '').strip()
     selected_reference = data.get('selected_close_reference')

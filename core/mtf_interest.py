@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any, Iterable, Mapping
 
 from core.allocations import allocate_proportional_amount, round_divide
+from core.settings_manager import get_default_mtf_rate_pct
 
-
-ANNUAL_RATE_PPM = 96500  # 9.65%
+def get_default_rate_ppm() -> float:
+    return get_default_mtf_rate_pct() * 10000
 
 
 def _calendar_holding_days(buy_date: str, sell_date: str) -> int:
@@ -77,12 +78,12 @@ def apply_mtf_interest(
         interest = 0
         raw_rate_ppm = buy_trade.get('mtf_rate_ppm')
         if raw_rate_ppm is None:
-            rate_ppm = 96500
+            rate_ppm = get_default_rate_ppm()
         else:
             try:
                 rate_ppm = float(raw_rate_ppm)
             except (ValueError, TypeError):
-                rate_ppm = 96500
+                rate_ppm = get_default_rate_ppm()
 
         if matched_mtf_amount > 0 and holding_days > 0:
             interest = round_divide(matched_mtf_amount * rate_ppm * holding_days, 365 * 1_000_000)

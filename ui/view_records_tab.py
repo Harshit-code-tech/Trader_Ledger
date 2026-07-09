@@ -566,13 +566,74 @@ class ViewRecordsTab:
 
         return where_clause, params
 
-    def _fetch_filtered_trades_for_export(self) -> list[tuple]:
-        """Fetch filtered trade rows with full v1.1 fields for export."""
+    def _fetch_filtered_trades_for_export(self, profile_ids: list[int] | None = None) -> list[tuple]:
+        """Fetch filtered trade rows with full v1.1 fields for export.
+        
+        Args:
+            profile_ids: If provided, override the current UI profile filter with these IDs.
+                          If None, uses the current UI filter state.
+        """
         where_clause, params = self._build_trade_filters()
+
+        # Override profile filter if explicit profile_ids provided
+        if profile_ids is not None:
+            # Remove any existing profile_id filter from the where clause and params
+            # by rebuilding without it
+            where_clause_base = " WHERE 1=1"
+            params_base: list = []
+
+            equity_filter = self.equity_filter.get()
+            if equity_filter and equity_filter != "All":
+                where_clause_base += " AND equity = ?"
+                params_base.append(equity_filter)
+
+            type_filter = self.type_filter.get()
+            if type_filter and type_filter != "All":
+                where_clause_base += " AND trade_type = ?"
+                params_base.append(type_filter)
+
+            date_from = self.date_from_entry.get().strip()
+            if date_from:
+                try:
+                    day, month, year = date_from.split('-')
+                    where_clause_base += " AND t.trade_date >= ?"
+                    params_base.append(f"{year}-{month}-{day}")
+                except ValueError:
+                    pass
+
+            date_to = self.date_to_entry.get().strip()
+            if date_to:
+                try:
+                    day, month, year = date_to.split('-')
+                    where_clause_base += " AND t.trade_date <= ?"
+                    params_base.append(f"{year}-{month}-{day}")
+                except ValueError:
+                    pass
+
+            if not self.show_deleted_trades.get():
+                where_clause_base += " AND t.is_active = 1"
+
+            if profile_ids:
+                placeholders = ','.join('?' * len(profile_ids))
+                where_clause_base += f" AND t.profile_id IN ({placeholders})"
+                params_base.extend(profile_ids)
+
+            where_clause = where_clause_base
+            params = params_base
+        else:
+            # Prefix table alias for the JOIN query
+            where_clause = where_clause.replace(" AND equity", " AND t.equity")
+            where_clause = where_clause.replace(" AND trade_type", " AND t.trade_type")
+            where_clause = where_clause.replace(" AND trade_date", " AND t.trade_date")
+            where_clause = where_clause.replace(" AND is_active", " AND t.is_active")
+            where_clause = where_clause.replace(" AND profile_id", " AND t.profile_id")
+
         query = (
-            "SELECT id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry, "
-            "quantity, price, brokerage, brokerage_auto, brokerage_override, mtf_amount, mtf_rate_ppm, notes, is_active "
-            f"FROM trade_events{where_clause} ORDER BY id DESC"
+            "SELECT t.id, t.trade_date, t.trade_ts, t.equity, t.trade_type, t.type1, t.type2, t.strike, t.expiry, "
+            "t.quantity, t.price, t.brokerage, t.brokerage_auto, t.brokerage_override, t.mtf_amount, t.mtf_rate_ppm, "
+            "t.notes, t.is_active, p.profile_name "
+            "FROM trade_events t LEFT JOIN profiles p ON t.profile_id = p.id"
+            f"{where_clause} ORDER BY t.id DESC"
         )
 
         conn = sqlite3.connect(str(config.DB_PATH))
@@ -1003,6 +1064,7 @@ Required Columns:
 • Price (in rupees, e.g., 350.50)
 
 Optional Columns:
+• Profile (profile name — if present, trades are assigned to matching profile; if profile doesn't exist, it will be created)
 • Brokerage (in rupees, default 0)
 • BrokerageOverride (in rupees, optional)
 • MtfAmount (in rupees, required for MTF BUY only)
@@ -1016,11 +1078,14 @@ Optional Columns:
 
 Example CSV:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,MtfRate,TradeTS,Notes,Type1,Type2,Strike,Expiry
-20-01-2026,TCS,BUY,10,350.50,10.00,,0,,2026-01-20 09:30:00,Sample trade,delivery,,,
-21-01-2026,RELIANCE,BUY,5,280.00,,8.00,0,,2026-01-21 10:05:00,Another trade,intraday,,,
-22-01-2026,NIFTY,BUY,50,12.00,2.00,,0,2026-01-22 11:00:00,Options entry,options,CE,22500,25-01-2026
+Date,Stock,Type,Qty,Price,Profile,Type1
+20-01-2026,TCS,BUY,10,350.50,Baba,delivery
+21-01-2026,RELIANCE,BUY,5,280.00,Didi,intraday
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Profile Behavior:
+• If CSV has a 'Profile' column → each row is assigned to its profile (new profiles are auto-created)
+• If CSV has no 'Profile' column → you'll be asked to pick a target profile
 
 Sample file available at:
 {str(config.SAMPLE_CSV_PATH)}
@@ -1036,7 +1101,7 @@ Tips:
         logger.info("Displayed CSV import format help")
     
     def import_trades_csv(self) -> None:
-        """Import trades from CSV file."""
+        """Import trades from CSV file with profile-aware assignment."""
         from tkinter import filedialog
         
         logger.info("Starting CSV import")
@@ -1072,16 +1137,25 @@ Tips:
                     logger.warning(f"Invalid CSV format: missing required columns")
                     return
                 
-                try:
-                    profile_id = int(config.PRIMARY_PROFILE_ID) if config.PRIMARY_PROFILE_ID is not None else None
-                except Exception:
-                    profile_id = None
-                if profile_id is None:
-                    messagebox.showwarning(
-                        "Select Profile",
-                        "Multiple profiles or Combined Family view selected. Select a single profile first."
-                    )
-                    return
+                # Check if CSV has a Profile column
+                has_profile_column = 'Profile' in (reader.fieldnames or [])
+                
+                # If no Profile column, ask user to pick a target profile
+                fallback_profile_id = None
+                if not has_profile_column:
+                    from ui.profile_picker import pick_import_profile
+                    result = pick_import_profile(self.parent)
+                    if not result:
+                        logger.debug("Import cancelled — no profile selected")
+                        return
+                    fallback_profile_id = result[0]
+                    logger.info(f"Import target profile: {result[1]} (id={fallback_profile_id})")
+
+                # Cache for profile name -> profile_id lookups (avoid repeated DB queries)
+                profile_cache: dict[str, int] = {}
+                from core.db_operations import get_active_profiles, create_profile, get_connection
+                for pid, pname in get_active_profiles():
+                    profile_cache[pname.strip().lower()] = pid
 
                 with sqlite3.connect(str(config.DB_PATH), timeout=10) as conn:
                     conn.execute("PRAGMA foreign_keys = ON")
@@ -1089,6 +1163,40 @@ Tips:
 
                     for line_num, row in enumerate(reader, start=2):  # Line 2 (after header)
                         try:
+                            # Determine profile_id for this row
+                            if has_profile_column:
+                                profile_name_raw = (row.get('Profile') or '').strip()
+                                if not profile_name_raw:
+                                    raise ValueError("Profile column is present but empty for this row")
+                                
+                                profile_key = profile_name_raw.lower()
+                                if profile_key in profile_cache:
+                                    row_profile_id = profile_cache[profile_key]
+                                else:
+                                    # Auto-create the profile
+                                    try:
+                                        cursor.execute(
+                                            "INSERT INTO profiles (profile_name, is_active) VALUES (?, 1)",
+                                            (profile_name_raw,)
+                                        )
+                                        row_profile_id = cursor.lastrowid
+                                        profile_cache[profile_key] = row_profile_id
+                                        logger.info(f"Auto-created profile '{profile_name_raw}' (id={row_profile_id})")
+                                    except sqlite3.IntegrityError:
+                                        # Profile was created by another thread/process
+                                        cursor.execute(
+                                            "SELECT id FROM profiles WHERE profile_name = ?",
+                                            (profile_name_raw,)
+                                        )
+                                        existing = cursor.fetchone()
+                                        if existing:
+                                            row_profile_id = existing[0]
+                                            profile_cache[profile_key] = row_profile_id
+                                        else:
+                                            raise ValueError(f"Failed to create or find profile '{profile_name_raw}'")
+                            else:
+                                row_profile_id = fallback_profile_id
+
                             # Parse date (supports DD-MM-YYYY or YYYY-MM-DD)
                             date_str = row['Date'].strip()
                             if not date_str:
@@ -1211,7 +1319,7 @@ Tips:
                             """, (
                                 trade_date, equity, trade_type, quantity, price_paise, brokerage_paise,
                                 brokerage_auto, brokerage_override, mtf_amount_paise, mtf_rate_ppm, trade_ts, notes,
-                                type1, type2, strike, expiry, profile_id
+                                type1, type2, strike, expiry, row_profile_id
                             ))
 
                             imported_count += 1
@@ -1240,17 +1348,45 @@ Tips:
             self.update_status("\u274c CSV import failed")
     
     def export_to_csv(self) -> None:
-        """Export current filtered records to CSV."""
+        """Export current filtered records to CSV with profile-aware folders."""
         logger.info("Exporting records to CSV")
         
         try:
-            # Get timestamp for filename
+            from ui.profile_picker import pick_export_profiles
+            import config as _config
+
+            # Determine which profiles to export
+            active_ids = _config.ACTIVE_PROFILE_IDS
+            if not active_ids or len(active_ids) > 1:
+                # Combined/family view — let user pick
+                selected = pick_export_profiles(self.parent)
+                if not selected:
+                    logger.debug("CSV export cancelled by user")
+                    return
+                profile_ids = [pid for pid, _ in selected]
+                profile_names = [pname for _, pname in selected]
+            else:
+                # Single profile — export directly
+                from core.db_operations import get_active_profiles
+                all_profiles = get_active_profiles()
+                profile_map = {pid: pname for pid, pname in all_profiles}
+                profile_ids = list(active_ids)
+                profile_names = [profile_map.get(pid, f"Profile_{pid}") for pid in profile_ids]
+
+            # Determine folder name
+            if len(profile_names) == 1:
+                folder_name = profile_names[0]
+            else:
+                folder_name = "Combined"
+
+            export_dir = config.EXPORTS_DIR / folder_name
+            export_dir.mkdir(parents=True, exist_ok=True)
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"trades_export_{timestamp}.csv"
-            filepath = config.EXPORTS_DIR / filename
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath = export_dir / filename
             
-            rows = self._fetch_filtered_trades_for_export()
+            rows = self._fetch_filtered_trades_for_export(profile_ids=profile_ids)
             
             if not rows:
                 messagebox.showwarning("No Data", "No records to export")
@@ -1263,13 +1399,13 @@ Tips:
                     'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
                     'Qty', 'PriceRupees', 'PricePaise',
                     'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
-                    'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status'
+                    'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status', 'Profile'
                 ])
 
                 for row in rows:
                     (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                      quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
-                     mtf_amount_paise, mtf_rate_ppm, notes, is_active) = row
+                     mtf_amount_paise, mtf_rate_ppm, notes, is_active, profile_name) = row
 
                     display_date = ""
                     if trade_date:
@@ -1302,11 +1438,12 @@ Tips:
                         int(mtf_amount_paise or 0),
                         f"{(mtf_rate_ppm / 10000):.2f}" if mtf_rate_ppm is not None else "",
                         notes or "",
-                        "Active" if is_active == 1 else "Deleted"
+                        "Active" if is_active == 1 else "Deleted",
+                        profile_name or ""
                     ])
             
             logger.info(f"✅ Exported {len(rows)} records to {filepath}")
-            self.update_status(f"✅ Exported to {filename}")
+            self.update_status(f"✅ Exported to {folder_name}/{filename}")
             messagebox.showinfo("Export Successful", f"Exported {len(rows)} records to:\n{filepath}")
             
         except Exception as e:
@@ -1314,7 +1451,7 @@ Tips:
             messagebox.showerror("Export Failed", f"Failed to export CSV:\n{str(e)}")
     
     def export_to_excel(self) -> None:
-        """Export current filtered records to Excel."""
+        """Export current filtered records to Excel with profile-aware folders."""
         logger.info("Exporting records to Excel")
         
         try:
@@ -1330,14 +1467,40 @@ Tips:
                     "Install it with:\npip install openpyxl"
                 )
                 return
-            
-            # Get timestamp for filename
+
+            from ui.profile_picker import pick_export_profiles
+            import config as _config
+
+            # Determine which profiles to export
+            active_ids = _config.ACTIVE_PROFILE_IDS
+            if not active_ids or len(active_ids) > 1:
+                selected = pick_export_profiles(self.parent)
+                if not selected:
+                    logger.debug("Excel export cancelled by user")
+                    return
+                profile_ids = [pid for pid, _ in selected]
+                profile_names = [pname for _, pname in selected]
+            else:
+                from core.db_operations import get_active_profiles
+                all_profiles = get_active_profiles()
+                profile_map = {pid: pname for pid, pname in all_profiles}
+                profile_ids = list(active_ids)
+                profile_names = [profile_map.get(pid, f"Profile_{pid}") for pid in profile_ids]
+
+            # Determine folder name
+            if len(profile_names) == 1:
+                folder_name = profile_names[0]
+            else:
+                folder_name = "Combined"
+
+            export_dir = config.EXPORTS_DIR / folder_name
+            export_dir.mkdir(parents=True, exist_ok=True)
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"trades_export_{timestamp}.xlsx"
-            filepath = config.EXPORTS_DIR / filename
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath = export_dir / filename
             
-            rows = self._fetch_filtered_trades_for_export()
+            rows = self._fetch_filtered_trades_for_export(profile_ids=profile_ids)
             
             if not rows:
                 messagebox.showwarning("No Data", "No records to export")
@@ -1353,7 +1516,7 @@ Tips:
                 'ID', 'Date', 'TradeTS', 'Stock', 'Type', 'Type1', 'Type2', 'Strike', 'Expiry',
                 'Qty', 'PriceRupees', 'PricePaise',
                 'BrokerageRupees', 'BrokeragePaise', 'BrokerageAutoPaise', 'BrokerageOverridePaise',
-                'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status'
+                'MtfAmountRupees', 'MtfAmountPaise', 'MtfRate', 'Notes', 'Status', 'Profile'
             ]
             ws.append(headers)
             
@@ -1370,7 +1533,7 @@ Tips:
             for row in rows:
                 (trade_id, trade_date, trade_ts, equity, trade_type, type1, type2, strike, expiry,
                  quantity, price_paise, brokerage_paise, brokerage_auto, brokerage_override,
-                 mtf_amount_paise, mtf_rate_ppm, notes, is_active) = row
+                 mtf_amount_paise, mtf_rate_ppm, notes, is_active, profile_name) = row
 
                 display_date = ""
                 if trade_date:
@@ -1403,7 +1566,8 @@ Tips:
                     int(mtf_amount_paise or 0),
                     float(mtf_rate_ppm / 10000) if mtf_rate_ppm is not None else "",
                     notes or "",
-                    "Active" if is_active == 1 else "Deleted"
+                    "Active" if is_active == 1 else "Deleted",
+                    profile_name or ""
                 ])
             
             # Auto-width columns
@@ -1423,7 +1587,7 @@ Tips:
             wb.save(filepath)
             
             logger.info(f"✅ Exported {len(rows)} records to {filepath}")
-            self.update_status(f"✅ Exported to {filename}")
+            self.update_status(f"✅ Exported to {folder_name}/{filename}")
             messagebox.showinfo("Export Successful", f"Exported {len(rows)} records to:\n{filepath}")
             
         except Exception as e:

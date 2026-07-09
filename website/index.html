@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trader Ledger | Download Desktop App</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="navbar">
+        <div class="logo">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            <span>Trader Ledger</span>
+        </div>
+        <nav class="nav-links">
+            <a href="https://github.com/Harshit-code-tech/Trader_Ledger#readme">Documentation</a>
+            <a href="https://github.com/Harshit-code-tech/Trader_Ledger">Source Code</a>
+        </nav>
+    </header>
+
+    <main class="full-screen-hero">
+        <div class="hero-left">
+            <div class="hero-text-content">
+                <div class="platform-tag">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.801"/></svg>
+                    For Windows 10/11
+                </div>
+                
+                <h1>The Ultimate<br>Desktop Trading Journal</h1>
+                <p class="subtitle">A fast, private, locally-installed Windows application to track your trades, calculate exact FIFO P/L, and automatically manage MTF interest.</p>
+                
+                <div class="download-section">
+                    <a id="download-btn" href="https://github.com/Harshit-code-tech/Trader_Ledger/releases/latest" class="download-button">
+                        <div class="btn-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </div>
+                        <div class="btn-text">
+                            <span class="primary-text">Download .EXE</span>
+                            <span id="version-text" class="secondary-text">Loading latest version...</span>
+                        </div>
+                    </a>
+                    <p class="security-note">✓ 100% Free & Open Source. No tracking. Data stays on your PC.</p>
+                </div>
+
+                <div class="key-features">
+                    <div class="feature-item">
+                        <strong>FIFO Engine:</strong> Automatically pairs buys and sells to calculate realized capital gains.
+                    </div>
+                    <div class="feature-item">
+                        <strong>Derivatives:</strong> Built-in support for Intraday, Options (CE/PE), and Futures.
+                    </div>
+                    <div class="feature-item">
+                        <strong>SQLite Database:</strong> Lightning-fast local storage. Export to CSV anytime.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="hero-right">
+            <!-- Tkinter-realistic mockup -->
+            <div class="tk-window">
+                <div class="tk-titlebar">
+                    <span class="tk-titlebar-icon">📊</span>
+                    <span class="tk-titlebar-text">Trader Ledger - Baba's Trading App</span>
+                    <div class="tk-titlebar-buttons">
+                        <span class="tk-btn-minimize">─</span>
+                        <span class="tk-btn-maximize">☐</span>
+                        <span class="tk-btn-close">✕</span>
+                    </div>
+                </div>
+
+                <!-- Toolbar row -->
+                <div class="tk-toolbar">
+                    <button class="tk-button">Check for Updates</button>
+                    <button class="tk-button">Profile</button>
+                    <button class="tk-button">Walkthrough</button>
+                </div>
+
+                <!-- ttk.Notebook tabs -->
+                <div class="tk-notebook">
+                    <div class="tk-tab">Add Trade</div>
+                    <div class="tk-tab active">View Records</div>
+                    <div class="tk-tab">Open Positions</div>
+                    <div class="tk-tab">P/L Report</div>
+                </div>
+
+                <!-- Tab content area -->
+                <div class="tk-tab-content">
+                    <!-- Filter bar -->
+                    <div class="tk-filter-bar">
+                        <span class="tk-label">Equity:</span>
+                        <select class="tk-combobox"><option>All</option></select>
+                        <span class="tk-label">Type:</span>
+                        <select class="tk-combobox"><option>All</option></select>
+                        <span class="tk-label">From:</span>
+                        <input class="tk-entry" value="01-01-2026" readonly>
+                        <span class="tk-label">To:</span>
+                        <input class="tk-entry" value="09-07-2026" readonly>
+                        <button class="tk-button tk-button-sm">Apply</button>
+                        <button class="tk-button tk-button-sm">Clear</button>
+                    </div>
+
+                    <!-- Treeview table -->
+                    <div class="tk-treeview">
+                        <div class="tk-tree-header">
+                            <span class="col-id">#</span>
+                            <span class="col-date">Date</span>
+                            <span class="col-stock">Stock</span>
+                            <span class="col-type">Type</span>
+                            <span class="col-type1">Type1</span>
+                            <span class="col-qty">Qty</span>
+                            <span class="col-price">Price ₹</span>
+                            <span class="col-brk">Brokerage ₹</span>
+                        </div>
+                        <div class="tk-tree-row even">
+                            <span class="col-id">47</span>
+                            <span class="col-date">09-07-2026</span>
+                            <span class="col-stock">RELIANCE</span>
+                            <span class="col-type buy-text">BUY</span>
+                            <span class="col-type1">DELIVERY</span>
+                            <span class="col-qty">50</span>
+                            <span class="col-price">2,450.00</span>
+                            <span class="col-brk">20.00</span>
+                        </div>
+                        <div class="tk-tree-row odd">
+                            <span class="col-id">46</span>
+                            <span class="col-date">08-07-2026</span>
+                            <span class="col-stock">TCS</span>
+                            <span class="col-type sell-text">SELL</span>
+                            <span class="col-type1">DELIVERY</span>
+                            <span class="col-qty">25</span>
+                            <span class="col-price">3,850.00</span>
+                            <span class="col-brk">20.00</span>
+                        </div>
+                        <div class="tk-tree-row even">
+                            <span class="col-id">45</span>
+                            <span class="col-date">07-07-2026</span>
+                            <span class="col-stock">HDFCBANK</span>
+                            <span class="col-type buy-text">BUY</span>
+                            <span class="col-type1">MTF</span>
+                            <span class="col-qty">100</span>
+                            <span class="col-price">1,620.00</span>
+                            <span class="col-brk">20.00</span>
+                        </div>
+                        <div class="tk-tree-row odd">
+                            <span class="col-id">44</span>
+                            <span class="col-date">05-07-2026</span>
+                            <span class="col-stock">INFY</span>
+                            <span class="col-type sell-text">SELL</span>
+                            <span class="col-type1">DELIVERY</span>
+                            <span class="col-qty">40</span>
+                            <span class="col-price">1,410.00</span>
+                            <span class="col-brk">20.00</span>
+                        </div>
+                        <div class="tk-tree-row even">
+                            <span class="col-id">43</span>
+                            <span class="col-date">03-07-2026</span>
+                            <span class="col-stock">NIFTY 25000 CE</span>
+                            <span class="col-type buy-text">BUY</span>
+                            <span class="col-type1">OPTIONS</span>
+                            <span class="col-qty">75</span>
+                            <span class="col-price">125.50</span>
+                            <span class="col-brk">2.00</span>
+                        </div>
+                        <div class="tk-tree-row odd">
+                            <span class="col-id">42</span>
+                            <span class="col-date">01-07-2026</span>
+                            <span class="col-stock">ITC</span>
+                            <span class="col-type buy-text">BUY</span>
+                            <span class="col-type1">DELIVERY</span>
+                            <span class="col-qty">200</span>
+                            <span class="col-price">450.00</span>
+                            <span class="col-brk">20.00</span>
+                        </div>
+                        <div class="tk-tree-row even">
+                            <span class="col-id">41</span>
+                            <span class="col-date">28-06-2026</span>
+                            <span class="col-stock">WIPRO</span>
+                            <span class="col-type sell-text">SELL</span>
+                            <span class="col-type1">INTRADAY</span>
+                            <span class="col-qty">150</span>
+                            <span class="col-price">420.00</span>
+                            <span class="col-brk">4.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Action buttons row -->
+                    <div class="tk-action-bar">
+                        <button class="tk-button">Edit Selected</button>
+                        <button class="tk-button">Delete Selected</button>
+                        <button class="tk-button">Export CSV</button>
+                        <button class="tk-button">Export Excel</button>
+                        <button class="tk-button">Import CSV</button>
+                    </div>
+                </div>
+
+                <!-- Status bar -->
+                <div class="tk-statusbar">
+                    <span class="tk-status-msg">✅ 47 records loaded</span>
+                    <span class="tk-status-profile">Profile: Baba</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    // Auto-fetch latest release from GitHub API and update the download link
+    (function() {
+        const REPO = 'Harshit-code-tech/Trader_Ledger';
+        const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+        const downloadBtn = document.getElementById('download-btn');
+        const versionText = document.getElementById('version-text');
+
+        fetch(API_URL)
+            .then(res => res.json())
+            .then(data => {
+                if (data.tag_name) {
+                    const version = data.tag_name.replace(/^v/, '');
+                    versionText.textContent = `Version ${version} • 64-bit`;
+
+                    // Find the .exe asset
+                    const exeAsset = (data.assets || []).find(a => a.name.endsWith('.exe'));
+                    if (exeAsset) {
+                        downloadBtn.href = exeAsset.browser_download_url;
+                    } else {
+                        // Fallback to the release page
+                        downloadBtn.href = data.html_url;
+                    }
+                }
+            })
+            .catch(() => {
+                versionText.textContent = 'Latest version • 64-bit';
+            });
+    })();
+    </script>
+</body>
+</html>

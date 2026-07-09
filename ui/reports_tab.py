@@ -1419,6 +1419,16 @@ class ReportsTab:
 
         return {idx: '|'.join(parts) for idx, parts in flags.items()}
 
+    def _get_current_profile_folder_name(self) -> str | None:
+        """Get the current profile name for export subfolder naming."""
+        import config as _config
+        active_ids = _config.ACTIVE_PROFILE_IDS
+        if not active_ids or len(active_ids) > 1:
+            return "Combined"
+        # Single profile
+        profile_name = _config.CURRENT_PROFILE_NAME
+        return profile_name if profile_name else None
+
     def export_audit_csv(self) -> None:
         """Export match-level audit details to CSV."""
         try:
@@ -1431,8 +1441,10 @@ class ReportsTab:
             trade_ts_map = self._get_trade_ts_map(trade_ids)
             remainder_flags = self._build_remainder_flag_by_match_index()
             
+            profile_name = self._get_current_profile_folder_name()
             filepath = reports_exporter.export_audit_csv(
-                self.audit_matches, self.audit_trades_by_id, trade_ts_map, remainder_flags
+                self.audit_matches, self.audit_trades_by_id, trade_ts_map, remainder_flags,
+                profile_name=profile_name
             )
             messagebox.showinfo("Export Complete", f"Audit CSV saved to:\n{filepath}")
         except Exception as e:
@@ -1444,7 +1456,8 @@ class ReportsTab:
         try:
             from core.exporters import reports_exporter
             data = self._collect_report_export_data()
-            filepath = reports_exporter.export_report_csv(data)
+            profile_name = self._get_current_profile_folder_name()
+            filepath = reports_exporter.export_report_csv(data, profile_name=profile_name)
             messagebox.showinfo("Export Complete", f"CSV report saved to:\n{filepath}")
         except Exception as e:
             logger.error(f"CSV export failed: {str(e)}", exc_info=True)
@@ -1455,7 +1468,8 @@ class ReportsTab:
         try:
             from core.exporters import reports_exporter
             data = self._collect_report_export_data()
-            filepath = reports_exporter.export_report_excel(data)
+            profile_name = self._get_current_profile_folder_name()
+            filepath = reports_exporter.export_report_excel(data, profile_name=profile_name)
             messagebox.showinfo("Export Complete", f"Excel report saved to:\n{filepath}")
         except Exception as e:
             logger.error(f"Excel export failed: {str(e)}", exc_info=True)

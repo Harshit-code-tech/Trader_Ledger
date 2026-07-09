@@ -4,7 +4,7 @@ A reliable, offline-first stock trade recording and accounting system with accur
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.5.0-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-brightgreen.svg)](docs/COMPREHENSIVE_DOCUMENTATION.md)
 
 ## 🎯 Overview
 
@@ -15,6 +15,8 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - ✅ **Accurate FIFO Calculations** - Automatically matches sell orders with buy orders using First-In-First-Out logic
 - ✅ **Trade Management** - Record, edit, and delete BUY/SELL transactions with validation
 - ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
+- 🆕 **Profile-Aware Import/Export (v1.6.0)** - Auto-organize exports by profile and assign imports via Profile column or picker.
+- 🆕 **GitHub Pages Auto-Deploy (v1.6.0)** - Website with auto-updating latest release download links.
 - 🆕 **Position State Engine (v1.5.0)** - Intelligent trade classification: each trade is automatically tagged as OPENING or CLOSING with flip-trade splitting
 - 🆕 **Open Position Filtering (v1.5.0)** - Filter and sort by open positions in Trade View
 - 🆕 **Analytics Help (v1.5.0)** - Interactive help button explaining all analytics metrics with infinity handling
@@ -25,15 +27,13 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
 
-## 🆕 What's New in v1.5.0
+## 🆕 What's New in v1.6.0
 
-Version 1.5.0 introduces a Position State Engine, improved Trade View, and better analytics UX:
+Version 1.6.0 introduces Profile-Aware Import/Export and a new landing page:
 
-- **Position State Engine:** Every trade is now automatically classified as OPENING or CLOSING. Flip trades (where a single trade reverses your position) are intelligently split into a closing portion and an opening portion, ensuring accurate FIFO matching.
-- **Open Position Filter in Trade View:** A new "Open Only" checkbox lets you quickly isolate open positions. A new "Status" sort option groups open positions first.
-- **Analytics Help Dialog:** An "ℹ️ What do these mean?" button in the Reports analytics section opens a rich, formatted popup explaining each metric—including why values like Win/Loss Ratio or Profit Factor may show as infinity.
-- **Persistent MTF Rate:** When you set a custom MTF rate for a trade, that value now carries over to subsequent trades in the same session until you change it again.
-- **Close Reference for Intraday/Futures/Options:** The "Close Against" dropdown now correctly shows open positions for all trade types, not just delivery.
+- **Profile-Aware Export:** When exporting to CSV or Excel in Combined view, a dialog lets you choose which profiles to export. Exports are saved to `data/exports/<ProfileName>/` subfolders and include a new `Profile` column.
+- **Profile-Aware Import:** CSV files can now include a `Profile` column. If present, trades are automatically assigned to their respective profiles (auto-creating them if they don't exist). If absent, a profile picker dialog asks you where to import the trades.
+- **Auto-Updating Website:** A new `website/` directory hosts the application's landing page on GitHub Pages, featuring JavaScript that automatically pulls the latest `.exe` release directly from the GitHub API. No manual website updates required when cutting a new release!
 
 👉 **[Read the Quick Start](QUICKSTART.md)** for day-to-day use  
 👉 **[Full Documentation](docs/COMPREHENSIVE_DOCUMENTATION.md)** for technical details
@@ -94,9 +94,9 @@ That's it! The Trader Ledger application window will open.
 2. Click **📁 Import CSV**
 3. Select your CSV file with format:
    ```csv
-   Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
-   22-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-22 09:30:00,Initial purchase,delivery,,,
-   23-01-2026,TCS,SELL,5,355.00,,12.00,0,2026-01-23 14:15:00,Partial exit,delivery,,,
+   Date,Stock,Type,Qty,Price,Profile,Type1
+   20-01-2026,TCS,BUY,10,350.50,Baba,delivery
+   21-01-2026,RELIANCE,BUY,5,280.00,Didi,intraday
    ```
 
 A sample template is available at `data/sample_import.csv`

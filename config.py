@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Application info
 APP_NAME = "Trader Ledger - Baba's Trading App"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 APP_AUTHOR = "Built for Baba"
 
 def get_data_directory():
@@ -41,6 +41,7 @@ LOGS_DIR = DATA_DIR / "logs"
 EXPORTS_DIR = DATA_DIR / "exports"
 ONBOARDING_STATE_FILE = DATA_DIR / "onboarding_seen.txt"
 PROFILE_STATE_FILE = DATA_DIR / "profile_state.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
 
 # Database
 DB_PATH = DATA_DIR / "trades.db"

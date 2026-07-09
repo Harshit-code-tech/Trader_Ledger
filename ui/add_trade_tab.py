@@ -61,11 +61,8 @@ class AddTradeTab:
             self.date_entry.insert(0, date.today().strftime('%d-%m-%Y'))
             
         # Fetch global default MTF rate safely
-        from core.db_operations import get_setting
-        try:
-            self.default_mtf_rate_pct = float(get_setting('default_mtf_rate_ppm', '96500')) / 10000
-        except (ValueError, TypeError):
-            self.default_mtf_rate_pct = 9.65
+        from core.settings_manager import get_default_mtf_rate_pct
+        self.default_mtf_rate_pct = get_default_mtf_rate_pct()
 
         self.mtf_rate_var.set(f"{self.default_mtf_rate_pct:.2f}")
         self.update_mtf_rate_hint()
@@ -460,7 +457,7 @@ class AddTradeTab:
             elif abs(val - self.default_mtf_rate_pct) < 0.001:
                 self.mtf_rate_hint.config(text=f"Using default rate: {self.default_mtf_rate_pct:.2f}%", foreground='gray')
             else:
-                self.mtf_rate_hint.config(text="Custom rate for this trade", foreground='#e67e22')
+                self.mtf_rate_hint.config(text="Custom rate for this and upcoming trades", foreground='#e67e22')
         except ValueError:
             self.mtf_rate_hint.config(text="Invalid rate format", foreground='red')
 
@@ -789,7 +786,11 @@ class AddTradeTab:
             mtf_rate_str = data.get('mtf_rate_pct', '').strip()
             if mtf_rate_str:
                 try:
-                    self.default_mtf_rate_pct = float(mtf_rate_str)
+                    new_rate = float(mtf_rate_str)
+                    if new_rate != self.default_mtf_rate_pct:
+                        self.default_mtf_rate_pct = new_rate
+                        from core.settings_manager import set_default_mtf_rate_pct
+                        set_default_mtf_rate_pct(new_rate)
                 except ValueError:
                     pass
 

@@ -1,4 +1,4 @@
-# Trader Ledger v1.5.0 - Quick Start Guide
+# Trader Ledger v1.6.0 - Quick Start Guide
 
 ## For First-Time Use
 
@@ -35,9 +35,9 @@ Just double-click **`run.bat`** to start the application.
 - Edit existing trades
 - Delete trades
 - Restore deleted trades
-- **📁 Import CSV** - Import trades from CSV file
-- **💾 Export CSV** - Export filtered trades
-- **📄 Export Excel** - Export to Excel format
+- **📁 Import CSV** - Import trades from CSV file. If no `Profile` column is present in your CSV, you will be prompted to pick a profile to import into.
+- **💾 Export CSV** - Export filtered trades. In Combined view, you can pick which profiles to export. Files are saved in profile-specific subfolders.
+- **📄 Export Excel** - Export to Excel format (same profile-aware folder structure).
 - **💾 Backup DB** - Backup database
 - **📥 Restore DB** - Restore from backup
 
@@ -65,9 +65,10 @@ Just double-click **`run.bat`** to start the application.
 
 To import trades, create a CSV file with these columns:
 
-```
-Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Type1,Type2,Strike,Expiry
-22-01-2026,TCS,BUY,10,350.50,10.00,,0,2026-01-22 09:30:00,Optional note,delivery,,,
+```csv
+Date,Stock,Type,Qty,Price,Profile,Type1
+20-01-2026,TCS,BUY,10,350.50,Baba,delivery
+21-01-2026,RELIANCE,BUY,5,280.00,Didi,intraday
 ```
 
 **Column Details:**
@@ -76,6 +77,7 @@ Date,Stock,Type,Qty,Price,Brokerage,BrokerageOverride,MtfAmount,TradeTS,Notes,Ty
 - **Type**: BUY or SELL
 - **Qty**: Number of shares (positive integer)
 - **Price**: Price per share in rupees (e.g., 350.50)
+- **Profile**: Profile name to auto-assign trades to (optional. If omitted, you will be asked to choose a profile during import).
 - **Brokerage**: Brokerage charges in rupees (optional, use 0 if none)
 - **BrokerageOverride**: Manual brokerage override in rupees when auto brokerage is not configured
 - **MtfAmount**: Required for MTF BUY trades
@@ -120,4 +122,4 @@ Check the log file: `logs/trader_ledger.log`
 
 ---
 
-**Version 1.5.0** - Ready for daily use
+**Version 1.6.0** - Ready for daily use
