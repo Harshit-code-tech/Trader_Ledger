@@ -14,6 +14,23 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pytest
 from core.pnl_aggregator import aggregate_pnl_by_date, aggregate_pnl_by_closing_trade, filter_matches_by_date_range
 from core.analytics_engine import calculate_advanced_metrics
+from ui.reports_tab import ReportsTab
+
+
+def test_report_rows_include_brokerage():
+    rows = ReportsTab.build_report_rows({
+        '2026-01-05': {'profit': 1200, 'loss': 0, 'brokerage': 300, 'net': 1200}
+    }, 'daily')
+
+    assert rows == [{
+        'period_key': '2026-01-05',
+        'label': '05 Jan 2026',
+        'profit': 1200,
+        'loss': 0,
+        'brokerage': 300,
+        'net': 1200,
+        'accumulated': 1200
+    }]
 
 def test_long_aggregation():
     # BUY on Jan 1, SELL on Jan 5

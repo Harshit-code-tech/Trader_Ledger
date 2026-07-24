@@ -131,7 +131,7 @@ class TradeViewTab:
 
         columns = (
             'Trade Label', 'Contract', 'Buy Qty', 'Avg Buy', 'Sell Qty', 'Avg Sell',
-            'Gross P/L', 'MTF Interest', 'Net P/L', 'Holding Days', 'Status', 'Remaining Qty'
+            'Gross P/L', 'Brokerage', 'MTF Interest', 'Net P/L', 'Holding Days', 'Status', 'Remaining Qty'
         )
 
         self.units_tree = ttk.Treeview(
@@ -157,6 +157,7 @@ class TradeViewTab:
         self.units_tree.column('Sell Qty', width=80, anchor='e')
         self.units_tree.column('Avg Sell', width=100, anchor='e')
         self.units_tree.column('Gross P/L', width=100, anchor='e')
+        self.units_tree.column('Brokerage', width=100, anchor='e')
         self.units_tree.column('MTF Interest', width=110, anchor='e')
         self.units_tree.column('Net P/L', width=110, anchor='e')
         self.units_tree.column('Holding Days', width=90, anchor='center')
@@ -174,7 +175,7 @@ class TradeViewTab:
 
         self.help_tip = ttk.Label(
             main_frame,
-            text="Gross P/L excludes MTF interest. Net P/L = Gross P/L - MTF interest.",
+            text="P/L is after brokerage and before MTF interest. Brokerage is shown separately.",
             font=('Arial', 9),
             foreground='gray'
         )
@@ -189,14 +190,14 @@ class TradeViewTab:
             trades = fetch_active_trades()
             if not trades:
                 self.units_tree.insert('', 'end', values=(
-                    "No trades found", "", "", "", "", "", "", "", "", "", "", ""
+                    "No trades found", "", "", "", "", "", "", "", "", "", "", "", ""
                 ), tags=('detail',))
                 return
 
             matches = match_fifo(trades)
             if not matches:
                 self.units_tree.insert('', 'end', values=(
-                    "No SELL trades yet", "", "", "", "", "", "", "", "", "", "", ""
+                    "No SELL trades yet", "", "", "", "", "", "", "", "", "", "", "", ""
                 ), tags=('detail',))
                 return
 
@@ -226,6 +227,7 @@ class TradeViewTab:
 
             for unit in units:
                 pnl_display = format_money(unit['realized_pnl'])
+                brokerage_display = format_money_abs(unit.get('total_brokerage', 0))
                 mtf_display = format_money_abs(unit.get('mtf_interest', 0)) if unit.get('mtf_interest') else ""
                 net_display = format_money(unit.get('net_pnl', unit['realized_pnl']))
                 avg_buy_display = format_money_abs(unit['avg_buy_price'])
@@ -246,6 +248,7 @@ class TradeViewTab:
                     f"{unit['total_sell_qty']:,}" if unit['total_sell_qty'] else "",
                     avg_sell_display,
                     pnl_display,
+                    brokerage_display,
                     mtf_display,
                     net_display,
                     holding_display,
@@ -264,6 +267,7 @@ class TradeViewTab:
 
                 self.units_tree.insert(parent_id, 'end', values=(
                     detail_text,
+                    "",
                     "",
                     "",
                     "",
@@ -298,6 +302,7 @@ class TradeViewTab:
                         )
                         self.units_tree.insert(parent_id, 'end', values=(
                             audit_text,
+                            "",
                             "",
                             "",
                             "",
@@ -372,6 +377,7 @@ class TradeViewTab:
 
             self.units_tree.insert(parent_id, 'end', values=(
                 detail,
+                "",
                 "",
                 "",
                 "",

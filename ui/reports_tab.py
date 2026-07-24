@@ -79,26 +79,33 @@ class ReportsTab:
                 'label': format_period_label(period_key, mode),
                 'profit': profit,
                 'loss': loss,
+                'brokerage': period_totals[period_key].get('brokerage', 0),
                 'net': net,
                 'accumulated': accumulated
             })
 
         return rows
 
-    def _convert_to_pnl_breakdown(self, pnl_totals: dict[str, int]) -> dict[str, dict[str, int]]:
+    def _convert_to_pnl_breakdown(
+        self,
+        pnl_totals: dict[str, int],
+        brokerage_totals: dict[str, int] | None = None
+    ) -> dict[str, dict[str, int]]:
         """
         Convert engine's simple P/L format to UI's profit/loss/net breakdown.
         Engine returns: {'2026-01-20': 1000} (net P/L in paise)
         UI needs: {'2026-01-20': {'profit': 1500, 'loss': -500, 'net': 1000}}
         """
         breakdown: dict[str, dict[str, int]] = {}
+        brokerage_totals = brokerage_totals or {}
         for key, net_pnl in pnl_totals.items():
+            brokerage = brokerage_totals.get(key, 0)
             if net_pnl > 0:
-                breakdown[key] = {'profit': net_pnl, 'loss': 0, 'net': net_pnl}
+                breakdown[key] = {'profit': net_pnl, 'loss': 0, 'brokerage': brokerage, 'net': net_pnl}
             elif net_pnl < 0:
-                breakdown[key] = {'profit': 0, 'loss': net_pnl, 'net': net_pnl}
+                breakdown[key] = {'profit': 0, 'loss': net_pnl, 'brokerage': brokerage, 'net': net_pnl}
             else:
-                breakdown[key] = {'profit': 0, 'loss': 0, 'net': 0}
+                breakdown[key] = {'profit': 0, 'loss': 0, 'brokerage': brokerage, 'net': 0}
         return breakdown
 
     def __init__(self, parent: ttk.Frame, status_callback: Callable[[str], None]) -> None:
@@ -304,7 +311,7 @@ class ReportsTab:
         scrollbar_x = ttk.Scrollbar(table_frame, orient='horizontal')
         scrollbar_x.pack(side='bottom', fill='x')
 
-        columns = ('Period', 'Profit', 'Loss', 'Net P/L', 'Running Total')
+        columns = ('Period', 'Profit', 'Loss', 'Brokerage', 'Net P/L', 'Running Total')
         self.pnl_tree = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -317,12 +324,14 @@ class ReportsTab:
         scrollbar_x.config(command=self.pnl_tree.xview)
 
         self.pnl_tree.heading('Period', text='Period', anchor='w')
+        self.pnl_tree.heading('Brokerage', text='Brokerage', anchor='e')
         self.pnl_tree.heading('Profit', text='Profit (₹)', anchor='e')
         self.pnl_tree.heading('Loss', text='Loss (₹)', anchor='e')
         self.pnl_tree.heading('Net P/L', text='Net P/L (₹)', anchor='e')
         self.pnl_tree.heading('Running Total', text='⭐ Accumulated (₹)', anchor='e')
 
         self.pnl_tree.column('Period', width=200, anchor='w')
+        self.pnl_tree.column('Brokerage', width=130, anchor='e')
         self.pnl_tree.column('Profit', width=130, anchor='e')
         self.pnl_tree.column('Loss', width=130, anchor='e')
         self.pnl_tree.column('Net P/L', width=130, anchor='e')
@@ -1067,14 +1076,30 @@ class ReportsTab:
             self.equity_pnl = self._convert_to_pnl_breakdown(equity_pnl_totals)
 
             daily_pnl_totals = aggregate_pnl_by_date(filtered_pnl_results, trades_by_id, pnl_field="net_pnl")
+            brokerage_matches = [
+                {
+                    **pnl,
+                    'total_brokerage': (
+                        int(pnl.get('buy_brokerage_alloc', 0))
+                        + int(pnl.get('sell_brokerage_alloc', 0))
+                    )
+                }
+                for pnl in filtered_pnl_results
+            ]
+            daily_brokerage_totals = aggregate_pnl_by_date(
+                brokerage_matches, trades_by_id, pnl_field="total_brokerage"
+            )
             weekly_pnl_totals = aggregate_pnl_by_week(daily_pnl_totals)
             monthly_pnl_totals = aggregate_pnl_by_month(daily_pnl_totals)
             yearly_pnl_totals = aggregate_pnl_by_year(monthly_pnl_totals)
+            weekly_brokerage_totals = aggregate_pnl_by_week(daily_brokerage_totals)
+            monthly_brokerage_totals = aggregate_pnl_by_month(daily_brokerage_totals)
+            yearly_brokerage_totals = aggregate_pnl_by_year(monthly_brokerage_totals)
 
-            self.daily_pnl = self._convert_to_pnl_breakdown(daily_pnl_totals)
-            self.weekly_pnl = self._convert_to_pnl_breakdown(weekly_pnl_totals)
-            self.monthly_pnl = self._convert_to_pnl_breakdown(monthly_pnl_totals)
-            self.yearly_pnl = self._convert_to_pnl_breakdown(yearly_pnl_totals)
+            self.daily_pnl = self._convert_to_pnl_breakdown(daily_pnl_totals, daily_brokerage_totals)
+            self.weekly_pnl = self._convert_to_pnl_breakdown(weekly_pnl_totals, weekly_brokerage_totals)
+            self.monthly_pnl = self._convert_to_pnl_breakdown(monthly_pnl_totals, monthly_brokerage_totals)
+            self.yearly_pnl = self._convert_to_pnl_breakdown(yearly_pnl_totals, yearly_brokerage_totals)
 
             self.total_profit = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] > 0)
             self.total_loss = sum(pnl['net_pnl'] for pnl in filtered_pnl_results if pnl['net_pnl'] < 0)
@@ -1196,6 +1221,7 @@ class ReportsTab:
                 "No realized P/L in this period",
                 "",
                 "",
+                "",
                 "(no SELL trades)",
                 ""
             ), tags=('empty',))
@@ -1211,6 +1237,7 @@ class ReportsTab:
                 row['label'],
                 format_money(row['profit']) if row['profit'] != 0 else "₹ 0.00",
                 format_money(row['loss']) if row['loss'] != 0 else "₹ 0.00",
+                format_money_abs(row['brokerage']) if row['brokerage'] else format_money_abs(0),
                 format_money(row['net']),
                 f"→ {format_money(row['accumulated'])}"
             ), tags=(tag,))
@@ -1332,7 +1359,7 @@ class ReportsTab:
 
         for item_id in self.pnl_tree.get_children():
             values = self.pnl_tree.item(item_id, 'values')
-            if len(values) >= 5:
+            if len(values) >= 6:
                 data['period']['rows'].append(values)
 
         if hasattr(self, 'equity_tree'):

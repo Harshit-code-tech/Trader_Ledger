@@ -14,7 +14,7 @@ Trader Ledger is a desktop application that helps individual retail traders main
 
 - ✅ **Accurate FIFO Calculations** - Automatically matches sell orders with buy orders using First-In-First-Out logic
 - ✅ **Trade Management** - Record, edit, and delete BUY/SELL transactions with validation
-- ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals
+- ✅ **Comprehensive Reports** - View P/L summaries by Day/Week/Month/Year with running totals and allocated brokerage
 - 🆕 **Profile-Aware Import/Export (v1.6.0)** - Auto-organize exports by profile and assign imports via Profile column or picker.
 - 🆕 **GitHub Pages Auto-Deploy (v1.6.0)** - Website with auto-updating latest release download links.
 - 🆕 **Position State Engine (v1.5.0)** - Intelligent trade classification: each trade is automatically tagged as OPENING or CLOSING with flip-trade splitting
@@ -25,6 +25,7 @@ Trader Ledger is a desktop application that helps individual retail traders main
 - 🆕 **Intraday Short-Selling (v1.4.3)** - Native FIFO support for Intraday shorting (Sell first, Buy later)
 - 🆕 **Auto Brokerage + MTF Interest (v1.2)** - Configurable auto brokerage and post-FIFO MTF interest support
 - 🆕 **Audit CSV Export (v1.2)** - Match-level export with allocation remainder tracing
+- ✅ **Click-Away Pickers** - Open dropdowns and calendar pickers close when you click elsewhere
 - ✅ **Database Backup/Restore** - Protect your trade history with automated backups
 
 ## 🆕 What's New in v1.6.0
@@ -40,10 +41,11 @@ Version 1.6.0 introduces Profile-Aware Import/Export and a new landing page:
 
 ## 📸 Screenshots
 
-The application includes three main tabs:
-- **Add Trade** - Record new trades with validation
+The application includes four main tabs:
+- **Add Trade** - Record new trades with validation, including an optional close-reference preview
 - **View Records** - Browse, filter, edit, import/export trades
-- **Reports** - Analyze profit/loss across different timeframes with filters, holdings, and trade value summaries
+- **Reports** - Analyze profit/loss across different timeframes with filters, holdings, trade value summaries, and brokerage totals
+- **Trade View** - Review grouped trade lifecycles, brokerage, MTF interest, and net P/L
 
 ## 🚀 Quick Start
 
@@ -81,12 +83,14 @@ That's it! The Trader Ledger application window will open.
 ### Adding Trades
 
 1. Navigate to the **Add Trade** tab
-2. Select date using the calendar picker
+2. Select date using the calendar picker. Open dropdowns and calendars close when you click elsewhere.
 3. Enter stock symbol (e.g., RELIANCE, TCS)
 4. Choose transaction type (BUY/SELL)
 5. Enter quantity, price, and brokerage
 6. Optionally add notes
 7. Click **Add Trade**
+
+For an MTF SELL, choose the same stock and select **MTF** as Type1. The optional **Close Against** dropdown refreshes when opened and lists matching MTF BUY lots that still have quantity remaining. It is a preview only: final matching remains FIFO.
 
 ### Importing from CSV
 
@@ -105,9 +109,10 @@ A sample template is available at `data/sample_import.csv`
 
 1. Navigate to the **Reports** tab
 2. Select timeframe filter (Daily/Weekly/Monthly/Yearly)
-3. Review profit/loss summaries with running totals
+3. Review profit/loss summaries, allocated brokerage, and running totals. Net P/L already reflects brokerage and MTF interest.
 4. Click **🖨️ Print** to generate an HTML report
-5. Click **🔄 Recalculate** to refresh calculations
+5. Use **Export CSV** or **Export Excel** to include the same brokerage column in the exported period report
+6. Click **🔄 Recalculate** to refresh calculations
 
 ### Managing Data
 

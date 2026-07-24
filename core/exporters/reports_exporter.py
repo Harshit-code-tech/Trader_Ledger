@@ -123,7 +123,7 @@ def export_report_csv(data: dict, profile_name: str | None = None) -> str:
         writer.writerow([])
 
         writer.writerow([f"{data['period']['type']} P/L"])
-        writer.writerow(["Period", "Profit", "Loss", "Net P/L", "Running Total"])
+        writer.writerow(["Period", "Profit", "Loss", "Brokerage", "Net P/L", "Running Total"])
         for row in data['period']['rows']:
             writer.writerow(row)
         writer.writerow([])
@@ -191,7 +191,7 @@ def export_report_excel(data: dict, profile_name: str | None = None) -> str:
     ws_summary.append(["Max Drawdown", data['summary']['max_drawdown']])
 
     ws_period = wb.create_sheet(title=f"{data['period']['type']} PnL")
-    ws_period.append(["Period", "Profit", "Loss", "Net P/L", "Running Total"])
+    ws_period.append(["Period", "Profit", "Loss", "Brokerage", "Net P/L", "Running Total"])
     for cell in ws_period[1]:
         cell.font = bold
     for row in data['period']['rows']:
@@ -261,13 +261,13 @@ def print_report_html(data: dict) -> str:
     </div>
     <h2>{period_type} P/L Breakdown</h2>
     <table>
-        <thead><tr><th>Period</th><th>Profit</th><th>Loss</th><th>Net P/L</th><th>Running Total</th></tr></thead>
+        <thead><tr><th>Period</th><th>Profit</th><th>Loss</th><th>Brokerage</th><th>Net P/L</th><th>Running Total</th></tr></thead>
         <tbody>
 """
 
     for row in data['period']['rows']:
-        if len(row) >= 5:
-            period_name, profit_str, loss_str, net_str, running_str = row
+        if len(row) >= 6:
+            period_name, profit_str, loss_str, brokerage_str, net_str, running_str = row
             row_class = 'profit' if '₹' in net_str and '-' not in net_str else 'loss' if '-' in net_str else ''
             
             html_content += f"""
@@ -275,6 +275,7 @@ def print_report_html(data: dict) -> str:
                 <td>{period_name}</td>
                 <td class="profit">{profit_str}</td>
                 <td class="loss">{loss_str}</td>
+                <td>{brokerage_str}</td>
                 <td class="{row_class}">{net_str}</td>
                 <td class="{'profit' if '-' not in running_str else 'loss'}">{running_str}</td>
             </tr>"""

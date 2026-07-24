@@ -119,8 +119,63 @@ class TraderLedgerApp:
         
         # Create tabs
         self.create_tabs()
+        self._install_popup_dismissal()
         self.root.after(400, self.show_onboarding_if_needed)
         logger.info("Main window initialized successfully")
+
+    def _install_popup_dismissal(self) -> None:
+        """Close open combobox and calendar popups when the user clicks elsewhere."""
+        # ``bind_all`` runs after ttk's own click bindings.  Do not blindly
+        # unpost every popup here: doing that would also close the combobox or
+        # DateEntry which the user has just clicked to open.
+        self.root.bind_all("<Button-1>", self._dismiss_popups_on_external_click, add="+")
+
+    @staticmethod
+    def _is_descendant_of(widget: tk.Misc, ancestor: tk.Misc) -> bool:
+        """Return whether *widget* is *ancestor* or belongs to its subtree."""
+        current: tk.Misc | None = widget
+        while current is not None:
+            if current is ancestor:
+                return True
+            current = getattr(current, "master", None)
+        return False
+
+    def _is_popup_interaction(self, target: tk.Misc) -> bool:
+        """Return True when a click belongs to a posted picker or its control."""
+        for widget in self._iter_widgets(self.root):
+            if isinstance(widget, ttk.Combobox):
+                # ttk creates its list popup as ``<combobox>.popdown``.
+                if target is widget or str(target).startswith(f"{widget}.popdown"):
+                    return True
+
+            top_cal = getattr(widget, "_top_cal", None)
+            if top_cal and top_cal.winfo_exists():
+                if target is widget or self._is_descendant_of(target, top_cal):
+                    return True
+        return False
+
+    def _dismiss_popups_on_external_click(self, event: tk.Event) -> None:
+        """Dismiss pickers only when the click happened outside those pickers."""
+        if not self._is_popup_interaction(event.widget):
+            self.root.after_idle(self._dismiss_popups)
+
+    def _iter_widgets(self, widget: tk.Misc):
+        yield widget
+        for child in widget.winfo_children():
+            yield from self._iter_widgets(child)
+
+    def _dismiss_popups(self) -> None:
+        for widget in self._iter_widgets(self.root):
+            try:
+                if isinstance(widget, ttk.Combobox):
+                    widget.tk.call("ttk::combobox::Unpost", str(widget))
+                    continue
+                if hasattr(widget, "_top_cal") and getattr(widget, "_top_cal"):
+                    top_cal = getattr(widget, "_top_cal")
+                    if top_cal.winfo_exists():
+                        top_cal.withdraw()
+            except Exception:
+                continue
 
     def show_profile_selector(self) -> None:
         """Modal dialog to select or create a profile at startup."""

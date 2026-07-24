@@ -41,6 +41,29 @@ except ImportError:
     logger.warning("tkcalendar not installed - using text entry for dates")
 
 
+def _normalize_optional_text(value: object, *, lower: bool = False, upper: bool = False) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    if lower:
+        return text.lower()
+    if upper:
+        return text.upper()
+    return text
+
+
+def _normalize_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
 class AddTradeTab:
     """Add Trade tab - allows user to input and save trades."""
     
@@ -211,6 +234,9 @@ class AddTradeTab:
             textvariable=self.close_ref_var,
             width=28,
             state='readonly',
+            # Refresh just before display so newly saved MTF BUY lots always
+            # appear, even if no other form field has changed.
+            postcommand=self.load_close_reference_options,
             font=('Consolas', 10)
         )
         self.close_ref_entry.grid(row=row, column=1, sticky='w', padx=5, pady=8)
@@ -519,6 +545,7 @@ class AddTradeTab:
         self.close_reference_meta = {}
         self.close_ref_entry['values'] = []
         self.close_ref_var.set('')
+        self.close_ref_hint.config(text="(reference only; FIFO applies)", foreground='gray')
 
         equity = self.equity_entry.get().strip().upper()
         if not equity:
@@ -564,7 +591,13 @@ class AddTradeTab:
                 continue
             if trade_equity.strip().upper() != equity:
                 continue
-            if trade_type1 != type1 or trade_type2 != type2 or trade_strike != strike or trade_expiry != expiry:
+            if _normalize_optional_text(trade_type1, lower=True) != type1:
+                continue
+            if _normalize_optional_text(trade_type2, upper=True) != type2:
+                continue
+            if _normalize_optional_float(trade_strike) != strike:
+                continue
+            if _normalize_optional_text(trade_expiry) != expiry:
                 continue
 
             matched_qty = matched_by_trade.get(trade_id, 0)
@@ -589,6 +622,8 @@ class AddTradeTab:
 
         options.sort(key=lambda item: item[0])
         self.close_ref_entry['values'] = [label for _date, label in options]
+        if not options:
+            self.close_ref_hint.config(text="(no matching open lots found)", foreground='red')
         
         try:
             self.update_price_preview()

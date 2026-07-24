@@ -33,6 +33,9 @@ class TradeUnit(TypedDict):
     total_buy_cost: int
     total_sell_value: int
     realized_pnl: int
+    buy_brokerage: int
+    sell_brokerage: int
+    total_brokerage: int
     mtf_interest: int
     net_pnl: int
     remaining_investment: int
@@ -348,6 +351,9 @@ def _build_sell_units(
             total_buy_cost=buy_cost + buy_brokerage,
             total_sell_value=sell_value - sell_brokerage,
             realized_pnl=realized_pnl,
+            buy_brokerage=buy_brokerage,
+            sell_brokerage=sell_brokerage,
+            total_brokerage=buy_brokerage + sell_brokerage,
             mtf_interest=sum(int(p.get('mtf_interest', 0)) for p in matches),
             net_pnl=sum(int(p.get('net_pnl', p['realized_pnl'])) for p in matches),
             remaining_investment=0,
@@ -476,6 +482,9 @@ def _finalize_unit(unit: UnitAccumulator, status: str, unit_index: int) -> Trade
         total_buy_cost=total_buy_cost,
         total_sell_value=total_sell_value,
         realized_pnl=unit.realized_pnl,
+        buy_brokerage=unit.buy_brokerage,
+        sell_brokerage=unit.sell_brokerage,
+        total_brokerage=unit.buy_brokerage + unit.sell_brokerage,
         mtf_interest=unit.mtf_interest,
         net_pnl=unit.net_pnl if unit.net_pnl else unit.realized_pnl,
         remaining_investment=remaining_investment,

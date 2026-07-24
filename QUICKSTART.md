@@ -28,7 +28,9 @@ Just double-click **`run.bat`** to start the application.
 ### Add Trade Tab
 - Add new BUY/SELL trades
 - Calendar date picker
+- Dropdowns and calendars close when you click elsewhere
 - Auto-validates inputs
+- For an MTF SELL, open **Close Against** to refresh and view matching open MTF BUY lots. This is an optional preview; final allocation is always FIFO.
 
 ### View Records Tab
 - Filter trades by date/stock/type
@@ -44,6 +46,7 @@ Just double-click **`run.bat`** to start the application.
 ### Reports Tab
 - View profit/loss summary
 - Daily/Weekly/Monthly/Yearly breakdowns
+- Brokerage totals shown separately in the period table and report exports
 - Running accumulated totals
 - Open positions with holding days
 - Total trade value and average day trade value
@@ -52,7 +55,7 @@ Just double-click **`run.bat`** to start the application.
 
 ### Trade View Tab
 - Group by lifecycle or sell transaction
-- See gross P/L, MTF interest, and net P/L
+- See P/L before MTF interest, allocated brokerage, MTF interest, and net P/L
 - Filter to show **Open Only** positions
 - Sort by Date, Profit/Loss, Holding Days, or Status
 - Expand a trade unit to view audit details
@@ -85,6 +88,10 @@ Date,Stock,Type,Qty,Price,Profile,Type1
 - **Notes**: Any notes about the trade (optional)
 
 A blank template is available at: `data/sample_import.csv`
+
+## Brokerage and P/L
+
+Brokerage is allocated to the quantity that was matched by FIFO. It is displayed separately in **Reports** and **Trade View** for transparency, but is already included in the P/L calculation. MTF interest is then deducted to produce Net P/L.
 
 ## Troubleshooting
 
